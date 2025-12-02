@@ -1,0 +1,76 @@
+{
+  "brand": "Mitsubishi Heavy Industries",
+
+  "protocol": {
+    "bus": "spi",
+    "bit_order": "MSB_FIRST",
+    "mode": "mode0"
+  },
+
+  "data": [
+    { "name": "MODE",            "bytes": ["C0", "02"] },
+    { "name": "SET-TEMP",        "bytes": ["C0", "05"] },
+    { "name": "RETURN-AIR",      "bytes": ["C0", "80"] },
+    { "name": "THI-R1",          "bytes": ["C0", "81"] },
+    { "name": "THI-R2",          "bytes": ["40", "81"] },
+    { "name": "THI-R3",          "bytes": ["C0", "87"] },
+    { "name": "IU-FANSPEED",     "bytes": ["C0", "1F"] },
+    { "name": "TOTAL-IU-RUN",    "bytes": ["C0", "1E"] },
+    { "name": "OUTDOOR",         "bytes": ["40", "80"] },
+    { "name": "THO-R1",          "bytes": ["40", "82"] },
+    { "name": "COMP",            "bytes": ["40", "11"] },
+    { "name": "TD",              "bytes": ["40", "85"] },
+    { "name": "CT",              "bytes": ["40", "90"] },
+    { "name": "TDSH",            "bytes": ["40", "B1"] },
+    { "name": "PROTECTION-NO",   "bytes": ["40", "7C"] },
+    { "name": "OU-FANSPEED",     "bytes": ["40", "1F"] },
+    { "name": "DEFROST",         "bytes": ["40", "0C"] },
+    { "name": "TOTAL-COMP-RUN",  "bytes": ["40", "1E"] },
+    { "name": "OU-EEV",          "bytes": ["40", "13"] },
+    { "name": "ENERGY-USED",     "bytes": ["C0", "94"] }
+  ],
+
+  "commands": {
+    "set_power": [
+      { "field": "DB0", "binary_or": ["02", "$POWER"] }
+    ],
+
+    "set_mode": [
+      { "field": "DB0", "binary_or": ["20", "$MODE"] }
+    ],
+
+    "set_temperature": [
+      { "field": "DB2", "binary_or": ["80", "$TEMP"] }
+    ],
+
+    "set_fan_speed": [
+      { "field": "DB1", "binary_or": ["08", "$FAN"] }
+    ],
+
+    "set_troom": [
+      { "field": "DB3", "value": "$TROOM" }
+    ],
+
+    "set_vanes_horizontal": [
+      { "field": "DB0", "binary_or": ["C0", "$VANES0"] },
+      { "field": "DB1", "binary_or": ["80", "$VANES1"] }
+    ],
+
+    "set_vanes_vertical": [
+      { "field": "DB16", "value": "$VANESLR1" },
+      { "field": "DB17", "binary_or": ["00", "$VANESLR0", "$3DAUTO"] }
+    ],
+
+    "set_3d_auto": [
+      { "field": "DB17", "binary_or": ["0A", "$3DAUTO"] }
+    ],
+
+    "request_error_data": [
+      { "field": "DB6", "value": "80" },
+      { "field": "DB9", "value": "45" }
+    ]
+  },
+
+  "families": {
+  }
+}
