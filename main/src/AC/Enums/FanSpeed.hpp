@@ -1,25 +1,19 @@
 #pragma once
 
+/**
+ * @file FanSpeed.hpp
+ * @brief Fan speed levels for AC units.
+ */
+
+/**
+ * @enum FanSpeed
+ * @brief Represents discrete fan speed settings.
+ *
+ * Numerical values map directly to protocol-level speed codes.
+ */
 enum class FanSpeed {
-    /**
-     * @brief Automatic fan speed regulation.
-     *
-     * The system determines the appropriate fan speed dynamically.
-     */
-    Auto = 0,
-
-    /**
-     * @brief Low fan speed.
-     */
-    Low  = 1,
-
-    /**
-     * @brief Medium fan speed.
-     */
-    Med  = 2,
-
-    /**
-     * @brief High fan speed.
-     */
-    High = 3
+    Auto = 0, ///< Automatic fan speed regulation
+    Low  = 1, ///< Low speed
+    Med  = 2, ///< Medium speed
+    High = 3  ///< High speed
 };

@@ -1,11 +1,20 @@
 #include "CommandResolver.hpp"
 
 std::optional<std::vector<std::string>> CommandResolver::resolve(
-    const ACProfile &profile,
+    const Profile &profile,
     const std::string &model,
     const std::string &family,
     const std::string &commandName
 ) {
+    /*
+     * Resolution order:
+     * 1. Model-level override
+     * 2. Family-level override
+     * 3. Root-level command template
+     *
+     * Each level optionally overrides the previous one.
+     */
+
     // 1. Model-level override
     if (profile.modelCommands.count(model)) {
         auto &mc = profile.modelCommands.at(model);
@@ -24,5 +33,6 @@ std::optional<std::vector<std::string>> CommandResolver::resolve(
     if (profile.commandTemplates.count(commandName))
         return profile.commandTemplates.at(commandName);
 
+    // No match in any layer
     return std::nullopt;
 }

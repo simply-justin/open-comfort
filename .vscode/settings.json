@@ -18,6 +18,7 @@
   ],
   "files.associations": {
     "*.embeddedhtml": "html",
-    "vector": "cpp"
+    "vector": "cpp",
+    "complex": "cpp"
   }
 }

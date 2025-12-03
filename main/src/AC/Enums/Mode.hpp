@@ -1,36 +1,19 @@
 #pragma once
 
+/**
+ * @file Mode.hpp
+ * @brief Operating modes for an AC unit.
+ */
+
+/**
+ * @enum Mode
+ * @brief Represents the primary operating modes of an air conditioner.
+ */
 enum class Mode {
-    /**
-     * @brief Device is turned off.
-     */
-    Off,
-
-    /**
-     * @brief Cooling mode.
-     */
-    Cool,
-
-    /**
-     * @brief Heating mode.
-     */
-    Heat,
-
-    /**
-     * @brief Dry mode.
-     */
-    Dry,
-
-    /**
-     * @brief Fan-only mode.
-     */
-    Fan,
-
-    /**
-     * @brief Automatic mode.
-     *
-     * The device determines the optimal operating mode based on
-     * current environmental conditions.
-     */
-    Auto
+    Off,  ///< Device is turned off
+    Cool, ///< Cooling mode
+    Heat, ///< Heating mode
+    Dry,  ///< Dehumidification mode
+    Fan,  ///< Fan-only mode (no heating or cooling)
+    Auto  ///< Automatic mode based on environment
 };
