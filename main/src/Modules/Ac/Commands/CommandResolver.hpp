@@ -4,7 +4,7 @@
 #include <vector>
 #include <optional>
 
-#include "AC/Models/Profile.hpp"
+#include "src/Modules/Ac/Models/Profile.hpp"
 
 /**
  * @file CommandResolver.hpp

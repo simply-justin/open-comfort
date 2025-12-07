@@ -20,41 +20,44 @@ extern "C" {
     #include "nvs_flash.h"
 }
 
+#include <memory>
+#include "src/Models/DeviceConfig.hpp"
+#include "src/Modules/IModule.hpp"
+#include "src/Modules/ModuleFactory.hpp"
+
 static const char *TAG = "APP_MAIN";
-
-/**
- * 
- */
-static void init_spiffs() {
-    esp_vfs_spiffs_conf_t conf = {
-        .base_path = "/spiffs",
-        .partition_label = nullptr,
-        .max_files = 5,
-        .format_if_mount_failed = true
-    };
-
-    esp_err_t ret = esp_vfs_spiffs_register(&conf);
-    if (ret != ESP_OK) {
-        ESP_LOGI(TAG, "Failed to mount or format SPIFFS (%s)", esp_err_to_name(ret));
-    } else {
-        size_t total = 0, used = 0;
-        esp_spiffs_info(nullptr, &total, &used);
-        ESP_LOGI(TAG, "SPIFFS mounted: total=%u, used=%u", (unsigned)total, (unsigned)used);
-    }
-}
 
 extern "C" void app_main(void)
 {
-    // NVS init
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ESP_ERROR_CHECK(nvs_flash_init());
+    // Check if we have an existing device profile.
+    auto cfg = std::make_unique<DeviceConfig>(); // TEMP
+
+    // If we dont have a profile yet we need to init the captive portal.
+    if (!cfg) {
+        ESP_LOGI(TAG, "No device profile found, starting captive portal...");
+        return; // TEMP
     }
 
-    init_spiffs();
+    // If we do have a profile we need to init the main application logic.
+    // First we need to determine the module to load based on the profile.
+    std::unique_ptr<IModule> module = ModuleFactory::create(cfg->moduleConfig);
 
-    auto bus = BusFactory::create(cfg);
-bus->init(cfg);
+    // Check if the module exits and is correctly booted.
+    if (!module) {
+        ESP_LOGE(TAG, "Failed to create module instance, halting.");
+        return;
+    }
 
+    module->bootstrap();
+    if (!module->isBooted()) {
+        ESP_LOGE(TAG, "Module failed to boot, halting.");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Entering main loop.");
+
+    // Start the main application loop.
+    while (true) {
+        module->run();
+    }
 }
