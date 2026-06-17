@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "Models/Bus.hpp"
+#include "src/Models/Bus.hpp"
 
 /**
  * @file IBus.hpp

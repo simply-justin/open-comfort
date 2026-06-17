@@ -1,48 +1,41 @@
 #pragma once
 
 #include <memory>
+#include <variant>
 
-#include "Models/Profile.hpp"
-#include "Enums/BusType.hpp"
-#include "IBus.hpp"
-#include "Uart.hpp"
-#include "Spi.hpp"
-#include "Can.hpp"
+#include "src/Enums/BusType.hpp"
+#include "src/Models/Bus.hpp"
+
+#include "src/Busses/IBus.hpp"
+#include "src/Busses/Uart.hpp"
+#include "src/Busses/Spi.hpp"
+#include "src/Busses/Can.hpp"
 
 /**
  * @file BusFactory.hpp
- * @brief Factory for creating IBus implementations based on BusConfig.
+ * @brief Factory for constructing IBus instances from a Bus configuration.
  */
 
 /**
  * @class BusFactory
- * @brief Creates the appropriate IBus subclass depending on BusConfig::type.
+ * @brief Creates a concrete bus implementation based on a Bus variant.
  *
- * The caller receives a std::unique_ptr<IBus>, ensuring ownership and
- * automatic cleanup. The selected bus instance is not initialized—call
- * init() with the same BusConfig after creation.
+ * The Bus variant holds exactly one of the supported bus configuration
+ * structures (UartConfig, SpiConfig, CanConfig). The factory inspects
+ * the active variant type and constructs the matching IBus instance.
  *
- * @ingroup buses
+ * The returned bus is not initialized — callers must invoke bus->init().
  */
 class BusFactory {
 public:
     /**
-     * @brief Create an IBus instance based on the requested bus type.
+     * @brief Create an IBus implementation from a Bus configuration variant.
      *
-     * The returned bus instance is not initialized; the caller must still
-     * call IBus::init(profile).
+     * Uses std::visit() to determine which configuration type is contained
+     * inside the variant and returns the corresponding bus object.
      *
-     * @param profile Contains the desired profile and other configuration options.
-     * @return std::unique_ptr<IBus> The created bus instance, or nullptr on invalid type.
+     * @param bus Variant containing one of the supported bus configurations.
+     * @return std::unique_ptr<IBus> The created bus instance, or nullptr if unsupported.
      */
-    static std::unique_ptr<IBus> create(const Profile &profile) {
-        switch (profile.protocol_bus) {
-            case BusType::UART:  return std::make_unique<Uart>();
-            case BusType::RS485: return std::make_unique<Uart>();
-            case BusType::SPI:   return std::make_unique<Spi>();
-            case BusType::CAN:   return std::make_unique<Can>();
-        }
-
-        return nullptr;
-    }
+    static std::unique_ptr<IBus> create(const Bus& bus);
 };

@@ -5,7 +5,7 @@
 
 /**
  * @file Bus.hpp
- * @brief Configuration structures for all supported bus types.
+ * @brief Configuration structures and type definitions for supported bus types.
  */
 
 /**
@@ -13,9 +13,9 @@
  * @brief UART / RS485 bus configuration.
  */
 struct UartConfig {
-    int txPin = -1;        ///< UART TX pin
-    int rxPin = -1;        ///< UART RX pin
-    int baudRate = 9600;   ///< Baud rate for UART or RS485
+    int txPin = -1;
+    int rxPin = -1;
+    int baudRate = 9600;
 };
 
 /**
@@ -23,10 +23,10 @@ struct UartConfig {
  * @brief SPI bus configuration parameters.
  */
 struct SpiConfig {
-    int sckPin  = -1;      ///< SPI clock pin
-    int mosiPin = -1;      ///< SPI MOSI pin
-    int misoPin = -1;      ///< SPI MISO pin
-    int freqHz  = 1000000; ///< SPI clock frequency in Hz
+    int sckPin  = -1;
+    int mosiPin = -1;
+    int misoPin = -1;
+    int freqHz  = 1000000;
 };
 
 /**
@@ -34,15 +34,29 @@ struct SpiConfig {
  * @brief CAN bus configuration parameters.
  */
 struct CanConfig {
-    int txPin = -1;        ///< CAN TX pin
-    int rxPin = -1;        ///< CAN RX pin
-    int baudRate = 500000; ///< CAN bus baud rate
+    int txPin = -1;
+    int rxPin = -1;
+    int baudRate = 500000;
 };
 
 /**
- * @brief Variant holding the configuration for any supported bus type.
+ * @brief Variant containing configuration for any supported bus type.
  *
- * This allows BusFactory (and other systems) to receive a single
- * configuration object whose actual type depends on BusType.
+ * A higher-level object (e.g., DeviceConfig) typically stores:
+ *   - a BusType indicating which bus is active, and
+ *   - a Bus variant containing the matching configuration.
+ *
+ * Example:
+ *     BusType type = BusType::CAN;
+ *     Bus cfg = CanConfig{5, 4, 500000};
+ *
+ * This allows BusFactory to construct the correct IBus implementation.
  */
 using Bus = std::variant<UartConfig, SpiConfig, CanConfig>;
+
+template <typename T>
+constexpr bool isBusConfig = std::disjunction_v<
+    std::is_same<T, UartConfig>,
+    std::is_same<T, SpiConfig>,
+    std::is_same<T, CanConfig>
+>;
