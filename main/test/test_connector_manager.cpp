@@ -1,4 +1,5 @@
 #include "unity.h"
+#include "unity_test_runner.h"
 
 #include "src/Connectors/ConnectorManager.hpp"
 
@@ -68,6 +69,28 @@ TEST_CASE("connector manager starts enabled connectors and stops disabled connec
     TEST_ASSERT_EQUAL(ESP_OK, manager.reconfigure(config));
     TEST_ASSERT_EQUAL(1, webPointer->reconfigures);
     TEST_ASSERT_EQUAL(1, mqttPointer->reconfigures);
+}
+
+TEST_CASE("connector manager keeps healthy connectors running after one start failure",
+          "[connectors]")
+{
+    ConnectorManager manager;
+    auto healthy = std::make_unique<MockConnector>(false);
+    auto degraded = std::make_unique<MockConnector>(false);
+    MockConnector* healthyPointer = healthy.get();
+    MockConnector* degradedPointer = degraded.get();
+    degradedPointer->startResult = ESP_FAIL;
+    TEST_ASSERT_TRUE(manager.add(std::move(healthy)));
+    TEST_ASSERT_TRUE(manager.add(std::move(degraded)));
+
+    UserConfig config;
+    TEST_ASSERT_EQUAL(ESP_FAIL, manager.start(config));
+    TEST_ASSERT_EQUAL(1, healthyPointer->starts);
+    TEST_ASSERT_EQUAL(1, degradedPointer->starts);
+
+    manager.tick();
+    TEST_ASSERT_EQUAL(1, healthyPointer->ticks);
+    TEST_ASSERT_EQUAL(1, degradedPointer->ticks);
 }
 
 }  // namespace opencomfort

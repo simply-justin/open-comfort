@@ -1,4 +1,5 @@
 #include "unity.h"
+#include "unity_test_runner.h"
 
 #include "src/Config/UserConfigStore.hpp"
 #include "src/Modules/IModule.hpp"
@@ -73,6 +74,42 @@ TEST_CASE("runtime controller rejects invalid states", "[runtime]")
     TEST_ASSERT_EQUAL(static_cast<int>(RuntimeRequestStatus::InvalidArgument),
                       static_cast<int>(runtime.requestDesiredState(
                           desired, RuntimeCommandSource::LocalWeb)));
+}
+
+TEST_CASE("runtime controller reports queue saturation without blocking", "[runtime]")
+{
+    MockModule module;
+    RuntimeController runtime(module);
+    TEST_ASSERT_TRUE(runtime.init());
+
+    AcDesiredState desired;
+    for (size_t i = 0; i < kRuntimeCommandQueueLength; ++i) {
+        desired.targetTempC = 16.0f + static_cast<float>(i);
+        TEST_ASSERT_EQUAL(static_cast<int>(RuntimeRequestStatus::Accepted),
+                          static_cast<int>(runtime.requestDesiredState(
+                              desired, RuntimeCommandSource::LocalWeb)));
+    }
+    TEST_ASSERT_EQUAL(static_cast<int>(RuntimeRequestStatus::QueueFull),
+                      static_cast<int>(runtime.requestDesiredState(
+                          desired, RuntimeCommandSource::Matter)));
+}
+
+TEST_CASE("runtime controller publishes command failures", "[runtime]")
+{
+    MockModule module;
+    module.applyResult = ESP_FAIL;
+    RuntimeController runtime(module);
+    TEST_ASSERT_TRUE(runtime.init());
+
+    AcDesiredState desired;
+    desired.targetTempC = 25.0f;
+    TEST_ASSERT_EQUAL(static_cast<int>(RuntimeRequestStatus::Accepted),
+                      static_cast<int>(runtime.requestDesiredState(
+                          desired, RuntimeCommandSource::HomeAssistantMqtt)));
+    runtime.process();
+
+    TEST_ASSERT_EQUAL(ESP_FAIL, runtime.snapshot().lastApplyError);
+    TEST_ASSERT_GREATER_THAN_UINT32(1, runtime.snapshot().revision);
 }
 
 TEST_CASE("user config v1 migration preserves product settings", "[config]")
