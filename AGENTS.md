@@ -13,9 +13,13 @@ Preferred setup:
 2. Run **Dev Containers: Reopen in Container**.
 3. The container installs ESP-IDF and configures the `esp32s3` target.
 
-On a Linux host without the devcontainer:
+On a Debian or Ubuntu host without the devcontainer:
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y \
+  bison ccache cmake dfu-util flex git gperf libffi-dev libssl-dev \
+  libusb-1.0-0-dev ninja-build python3 python3-pip python3-venv wget
 ./scripts/bootstrap-dev.sh
 source "$HOME/.espressif/frameworks/esp-idf-v5.5.1/export.sh"
 idf.py set-target esp32s3

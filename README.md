@@ -23,8 +23,17 @@ after creation.
 
 ### Linux host
 
-If a container is unavailable, install the SDK and toolchain under your user
-account:
+If a container is unavailable, install the ESP-IDF host prerequisites first.
+For Debian or Ubuntu:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  bison ccache cmake dfu-util flex git gperf libffi-dev libssl-dev \
+  libusb-1.0-0-dev ninja-build python3 python3-pip python3-venv wget
+```
+
+Then install the SDK and toolchain under your user account:
 
 ```bash
 ./scripts/bootstrap-dev.sh
