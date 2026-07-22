@@ -50,6 +50,7 @@ struct ProductDefinition {
     size_t allowedBusCount;
     const char* portalApPassword;
     const char* profileCatalogUrl;
+    bool supportsMatter;
 };
 
 const ProductDefinition& currentProduct();

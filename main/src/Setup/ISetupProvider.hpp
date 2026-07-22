@@ -1,5 +1,6 @@
 #pragma once
 
+#include "src/Config/ConnectorSecretStore.hpp"
 #include "src/Config/UserConfig.hpp"
 #include "src/Setup/SetupSchema.hpp"
 #include "src/Wifi/WiFiService.hpp"
@@ -14,6 +15,9 @@ struct SetupDraft {
     char modelId[kMaxModelIdLen + 1] = {};
     char profileVersion[kMaxProfileVersionLen + 1] = {};
     BusKind bus = BusKind::Unknown;
+    ConnectorConfig connectors = {};
+    MqttCredentials mqttCredentials = {};
+    char adminPassword[65] = {};
 };
 
 class ISetupProvider {

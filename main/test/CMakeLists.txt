@@ -1,0 +1,10 @@
+idf_component_register(
+    SRCS
+        test_runtime.cpp
+        test_connector_manager.cpp
+    INCLUDE_DIRS
+        ".."
+    REQUIRES
+        unity
+        main
+)

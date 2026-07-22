@@ -9,6 +9,20 @@ extern "C" {
 }
 
 namespace opencomfort {
+UserConfig migrateUserConfigV1(const UserConfigV1& source)
+{
+    UserConfig out;
+    out.schemaVersion = kUserConfigSchemaVersion;
+    out.provisioned = source.provisioned;
+    copyBounded(out.friendlyName, sizeof(out.friendlyName), source.friendlyName);
+    out.module = source.module;
+    copyBounded(out.ac.profileId, sizeof(out.ac.profileId), source.ac.profileId);
+    copyBounded(out.ac.profileVersion, sizeof(out.ac.profileVersion), source.ac.profileVersion);
+    copyBounded(out.ac.modelId, sizeof(out.ac.modelId), source.ac.modelId);
+    out.ac.bus = source.ac.bus;
+    return out;
+}
+
 namespace {
 
 constexpr const char* kTag = "UserConfigStore";
@@ -30,19 +44,40 @@ bool ensureNvs()
     return err == ESP_OK;
 }
 
-ConfigStatus readSlot(nvs_handle_t handle, const char* key, UserConfig& out)
+ConfigStatus readSlot(nvs_handle_t handle, const char* key, UserConfig& out, bool& migrated)
 {
-    size_t size = sizeof(UserConfig);
-    UserConfig tmp = {};
-    esp_err_t err = nvs_get_blob(handle, key, &tmp, &size);
+    migrated = false;
+    size_t size = 0;
+    esp_err_t err = nvs_get_blob(handle, key, nullptr, &size);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         return ConfigStatus::NotFound;
     }
-    if (err != ESP_OK || size != sizeof(UserConfig)) {
+    if (err != ESP_OK) {
         return ConfigStatus::Corrupt;
     }
-    out = tmp;
-    return ConfigStatus::Ok;
+
+    if (size == sizeof(UserConfigV1)) {
+        UserConfigV1 legacy{};
+        err = nvs_get_blob(handle, key, &legacy, &size);
+        if (err != ESP_OK || legacy.schemaVersion != 1) {
+            return ConfigStatus::Corrupt;
+        }
+        out = migrateUserConfigV1(legacy);
+        migrated = true;
+        return ConfigStatus::Ok;
+    }
+
+    if (size == sizeof(UserConfig)) {
+        UserConfig current{};
+        err = nvs_get_blob(handle, key, &current, &size);
+        if (err != ESP_OK) {
+            return ConfigStatus::Corrupt;
+        }
+        out = current;
+        return ConfigStatus::Ok;
+    }
+
+    return ConfigStatus::Corrupt;
 }
 
 }  // namespace
@@ -72,6 +107,17 @@ ConfigStatus UserConfigStore::validate(const UserConfig& config, const ProductDe
         return ConfigStatus::Invalid;
     }
     if (config.friendlyName[0] == '\0') {
+        return ConfigStatus::Invalid;
+    }
+    if (!config.connectors.localWebEnabled) {
+        return ConfigStatus::Invalid;
+    }
+    if (config.connectors.mqttEnabled &&
+        (config.connectors.mqttHost[0] == '\0' || config.connectors.mqttPort == 0 ||
+         config.connectors.mqttDiscoveryPrefix[0] == '\0')) {
+        return ConfigStatus::Invalid;
+    }
+    if (config.connectors.matterEnabled && !product.supportsMatter) {
         return ConfigStatus::Invalid;
     }
     if (config.module == ModuleKind::Ac) {
@@ -117,8 +163,21 @@ ConfigLoadResult UserConfigStore::load()
         return result;
     }
 
+    if (active > 1) {
+        nvs_close(handle);
+        result.status = ConfigStatus::Corrupt;
+        return result;
+    }
+
     const char* key = (active == 0) ? kSlot0Key : kSlot1Key;
-    ConfigStatus status = readSlot(handle, key, result.config);
+    bool migrated = false;
+    ConfigStatus status = readSlot(handle, key, result.config, migrated);
+    bool recoveredInactive = false;
+    if (status != ConfigStatus::Ok) {
+        const char* fallbackKey = (active == 0) ? kSlot1Key : kSlot0Key;
+        status = readSlot(handle, fallbackKey, result.config, migrated);
+        recoveredInactive = (status == ConfigStatus::Ok);
+    }
     nvs_close(handle);
 
     if (status != ConfigStatus::Ok) {
@@ -127,6 +186,11 @@ ConfigLoadResult UserConfigStore::load()
     }
 
     if (result.config.schemaVersion != kUserConfigSchemaVersion) {
+        result.status = ConfigStatus::Invalid;
+        return result;
+    }
+
+    if (migrated || recoveredInactive) {
         result.status = ConfigStatus::MigrationRequired;
         return result;
     }

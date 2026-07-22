@@ -4,6 +4,7 @@
 #include <cstring>
 #include <string>
 
+#include "src/Config/ConnectorSecretStore.hpp"
 #include "src/Config/UserConfigStore.hpp"
 #include "src/Setup/AcSetupProvider.hpp"
 #include "src/Setup/ISetupProvider.hpp"
@@ -36,6 +37,7 @@ struct PortalContext {
     SetupDraft draft = {};
     bool wifiConfigured = false;
     bool moduleConfigured = false;
+    bool connectorsConfigured = false;
     bool finished = false;
     bool success = false;
     UserConfig result = {};
@@ -194,6 +196,8 @@ esp_err_t handleSession(httpd_req_t* req)
     cJSON_AddStringToObject(json, "module", toString(g_ctx->product->module));
     cJSON_AddBoolToObject(json, "wifiConfigured", g_ctx->wifiConfigured);
     cJSON_AddBoolToObject(json, "moduleConfigured", g_ctx->moduleConfigured);
+    cJSON_AddBoolToObject(json, "connectorsConfigured", g_ctx->connectorsConfigured);
+    cJSON_AddBoolToObject(json, "matterSupported", g_ctx->product->supportsMatter);
     return sendJson(req, json);
 }
 
@@ -354,9 +358,74 @@ esp_err_t handleSetupPut(httpd_req_t* req)
     return sendJson(req, json);
 }
 
+esp_err_t handleConnectorsPut(httpd_req_t* req)
+{
+    const std::string body = readBody(req);
+    cJSON* root = cJSON_Parse(body.c_str());
+    if (root == nullptr) {
+        return sendError(req, 400, "invalid_json");
+    }
+
+    const cJSON* adminPassword = cJSON_GetObjectItem(root, "adminPassword");
+    const cJSON* mqttEnabled = cJSON_GetObjectItem(root, "mqttEnabled");
+    const cJSON* matterEnabled = cJSON_GetObjectItem(root, "matterEnabled");
+    const cJSON* mqttHost = cJSON_GetObjectItem(root, "mqttHost");
+    const cJSON* mqttPort = cJSON_GetObjectItem(root, "mqttPort");
+    const cJSON* mqttTls = cJSON_GetObjectItem(root, "mqttTls");
+    const cJSON* mqttUsername = cJSON_GetObjectItem(root, "mqttUsername");
+    const cJSON* mqttPassword = cJSON_GetObjectItem(root, "mqttPassword");
+
+    if (!cJSON_IsString(adminPassword) || adminPassword->valuestring == nullptr ||
+        std::strlen(adminPassword->valuestring) < 8) {
+        cJSON_Delete(root);
+        return sendError(req, 400, "admin_password_too_short");
+    }
+
+    const bool enableMqtt = cJSON_IsTrue(mqttEnabled);
+    const bool enableMatter = cJSON_IsTrue(matterEnabled);
+    if (enableMatter && !g_ctx->product->supportsMatter) {
+        cJSON_Delete(root);
+        return sendError(req, 400, "matter_not_supported");
+    }
+    if (enableMqtt &&
+        (!cJSON_IsString(mqttHost) || mqttHost->valuestring == nullptr ||
+         mqttHost->valuestring[0] == '\0')) {
+        cJSON_Delete(root);
+        return sendError(req, 400, "mqtt_host_required");
+    }
+
+    g_ctx->draft.connectors = ConnectorConfig{};
+    g_ctx->draft.connectors.mqttEnabled = enableMqtt;
+    g_ctx->draft.connectors.matterEnabled = enableMatter;
+    g_ctx->draft.connectors.mqttTls = !cJSON_IsFalse(mqttTls);
+    if (cJSON_IsNumber(mqttPort) && mqttPort->valueint > 0 && mqttPort->valueint <= 65535) {
+        g_ctx->draft.connectors.mqttPort = static_cast<uint16_t>(mqttPort->valueint);
+    }
+    if (cJSON_IsString(mqttHost) && mqttHost->valuestring != nullptr) {
+        copyBounded(g_ctx->draft.connectors.mqttHost,
+                    sizeof(g_ctx->draft.connectors.mqttHost), mqttHost->valuestring);
+    }
+    if (cJSON_IsString(mqttUsername) && mqttUsername->valuestring != nullptr) {
+        copyBounded(g_ctx->draft.mqttCredentials.username,
+                    sizeof(g_ctx->draft.mqttCredentials.username), mqttUsername->valuestring);
+    }
+    if (cJSON_IsString(mqttPassword) && mqttPassword->valuestring != nullptr) {
+        copyBounded(g_ctx->draft.mqttCredentials.password,
+                    sizeof(g_ctx->draft.mqttCredentials.password), mqttPassword->valuestring);
+    }
+    copyBounded(g_ctx->draft.adminPassword, sizeof(g_ctx->draft.adminPassword),
+                adminPassword->valuestring);
+    cJSON_Delete(root);
+
+    g_ctx->connectorsConfigured = true;
+    cJSON* json = cJSON_CreateObject();
+    cJSON_AddBoolToObject(json, "ok", true);
+    return sendJson(req, json);
+}
+
 esp_err_t handleCommit(httpd_req_t* req)
 {
-    if (!g_ctx->wifiConfigured || !g_ctx->moduleConfigured) {
+    if (!g_ctx->wifiConfigured || !g_ctx->moduleConfigured || !g_ctx->connectorsConfigured) {
         return sendError(req, 400, "setup_incomplete");
     }
 
@@ -368,6 +437,17 @@ esp_err_t handleCommit(httpd_req_t* req)
 
     if (WiFiService::saveCredentials(g_ctx->draft.wifi) != ESP_OK) {
         return sendError(req, 500, "wifi_save_failed");
+    }
+
+    if (ConnectorSecretStore::setAdminPassword(g_ctx->draft.adminPassword) != ESP_OK) {
+        return sendError(req, 500, "admin_password_save_failed");
+    }
+    const esp_err_t mqttSecretError =
+        config.connectors.mqttEnabled
+            ? ConnectorSecretStore::saveMqttCredentials(g_ctx->draft.mqttCredentials)
+            : ConnectorSecretStore::clearMqttCredentials();
+    if (mqttSecretError != ESP_OK) {
+        return sendError(req, 500, "mqtt_credentials_save_failed");
     }
 
     if (UserConfigStore::save(config) != ConfigStatus::Ok) {
@@ -411,6 +491,8 @@ esp_err_t startHttpServer(PortalContext& ctx)
     const httpd_uri_t routeWifi = {"/api/v1/wifi", HTTP_PUT, handleWifiPut, nullptr};
     const httpd_uri_t routeSchema = {"/api/v1/setup/schema", HTTP_GET, handleSetupSchema, nullptr};
     const httpd_uri_t routeModule = {"/api/v1/setup/module", HTTP_PUT, handleSetupPut, nullptr};
+    const httpd_uri_t routeConnectors = {"/api/v1/setup/connectors", HTTP_PUT,
+                                         handleConnectorsPut, nullptr};
     const httpd_uri_t routeCommit = {"/api/v1/setup/commit", HTTP_POST, handleCommit, nullptr};
     const httpd_uri_t route204 = {"/generate_204", HTTP_GET, handleCaptiveProbe, nullptr};
     const httpd_uri_t routeApple = {"/hotspot-detect.html", HTTP_GET, handleCaptiveProbe, nullptr};
@@ -424,6 +506,7 @@ esp_err_t startHttpServer(PortalContext& ctx)
     httpd_register_uri_handler(ctx.server, &routeWifi);
     httpd_register_uri_handler(ctx.server, &routeSchema);
     httpd_register_uri_handler(ctx.server, &routeModule);
+    httpd_register_uri_handler(ctx.server, &routeConnectors);
     httpd_register_uri_handler(ctx.server, &routeCommit);
     httpd_register_uri_handler(ctx.server, &route204);
     httpd_register_uri_handler(ctx.server, &routeApple);

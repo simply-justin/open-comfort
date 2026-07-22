@@ -32,6 +32,8 @@ struct ConfigLoadResult {
     UserConfig config = {};
 };
 
+UserConfig migrateUserConfigV1(const UserConfigV1& source);
+
 class UserConfigStore {
 public:
     static bool init();

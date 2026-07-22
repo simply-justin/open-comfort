@@ -1,10 +1,21 @@
+set(OPENCOMFORT_OPTIONAL_REQUIRES)
+if(CONFIG_OPENCOMFORT_ENABLE_MATTER)
+    list(APPEND OPENCOMFORT_OPTIONAL_REQUIRES opencomfort_matter)
+endif()
+
 idf_component_register(
     SRCS
         main.cpp
         src/Application/Application.cpp
         src/Product/ProductDefinition.cpp
         src/Config/UserConfigStore.cpp
+        src/Config/ConnectorSecretStore.cpp
         src/Config/FactoryReset.cpp
+        src/Connectors/ConnectorManager.cpp
+        src/Connectors/Web/RuntimeHttpConnector.cpp
+        src/Connectors/Mqtt/HomeAssistantMqttConnector.cpp
+        src/Connectors/Matter/MatterConnector.cpp
+        src/Connectors/Matter/MatterPlatform.cpp
         src/Bus/BusConfig.cpp
         src/Bus/BusFactory.cpp
         src/Bus/UartTransport.cpp
@@ -16,6 +27,7 @@ idf_component_register(
         src/Profiles/ProfileRepository.cpp
         src/Profiles/ProfileCrypto.cpp
         src/Profiles/HttpDownloader.cpp
+        src/Runtime/RuntimeController.cpp
         src/Modules/ModuleFactory.cpp
         src/Modules/Ac/Ac.cpp
         src/Modules/Ac/AcProtocolEngine.cpp
@@ -29,11 +41,15 @@ idf_component_register(
         esp_http_server
         esp_http_client
         esp_https_ota
+        mqtt
+        espressif__mdns
         esp_netif
         esp_event
         driver
         vfs
         mbedtls
+    PRIV_REQUIRES
+        ${OPENCOMFORT_OPTIONAL_REQUIRES}
 )
 
 spiffs_create_partition_image(storage spiffs FLASH_IN_PROJECT)

@@ -1,0 +1,9 @@
+idf_component_register(
+    SRCS
+        MatterPlatformEsp.cpp
+    INCLUDE_DIRS
+        "."
+        "${PROJECT_DIR}/main"
+    REQUIRES
+        esp_matter
+)

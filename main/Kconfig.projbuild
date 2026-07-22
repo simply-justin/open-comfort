@@ -25,6 +25,40 @@ menu "OpenComfort Product"
             bool "Revision A (ESP32-S3)"
     endchoice
 
+    choice OPENCOMFORT_FIRMWARE_PROFILE
+        prompt "Firmware capability profile"
+        default OPENCOMFORT_PROFILE_LEGACY_4MB
+
+        config OPENCOMFORT_PROFILE_LEGACY_4MB
+            bool "Legacy 4 MB (web and Home Assistant MQTT)"
+
+        config OPENCOMFORT_PROFILE_MATTER_16MB
+            bool "Matter 16 MB (web, MQTT, and Matter)"
+    endchoice
+
+    config OPENCOMFORT_ENABLE_MATTER
+        bool
+        default y if OPENCOMFORT_PROFILE_MATTER_16MB
+        default n
+
+    config OPENCOMFORT_MATTER_DEVELOPMENT_CREDENTIALS
+        bool "Allow development Matter commissioning credentials"
+        depends on OPENCOMFORT_ENABLE_MATTER
+        default y
+        help
+            Development only. Production builds must disable this and inject
+            unique DAC/PAI/CD, discriminator, and passcode data into fctry.
+
+    config OPENCOMFORT_RUNTIME_HTTP_PORT
+        int "Runtime web portal port"
+        default 80
+        range 1 65535
+
+    config OPENCOMFORT_MQTT_RECONNECT_MAX_MS
+        int "Maximum MQTT reconnect delay (ms)"
+        default 60000
+        range 1000 300000
+
     config OPENCOMFORT_PORTAL_AP_PASSWORD
         string "Default SoftAP password for portal"
         default "opencomfort"

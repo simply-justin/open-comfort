@@ -6,10 +6,15 @@
 
 #include "src/Config/FactoryReset.hpp"
 #include "src/Config/UserConfigStore.hpp"
+#include "src/Connectors/ConnectorManager.hpp"
+#include "src/Connectors/Matter/MatterConnector.hpp"
+#include "src/Connectors/Mqtt/HomeAssistantMqttConnector.hpp"
+#include "src/Connectors/Web/RuntimeHttpConnector.hpp"
 #include "src/Http/CaptivePortal.hpp"
 #include "src/Modules/ModuleFactory.hpp"
 #include "src/Product/ProductDefinition.hpp"
 #include "src/Profiles/ProfileRepository.hpp"
+#include "src/Runtime/RuntimeController.hpp"
 #include "src/Wifi/WiFiService.hpp"
 
 extern "C" {
@@ -56,6 +61,14 @@ void Application::run()
 
     ConfigLoadResult loaded = UserConfigStore::load();
     UserConfig config = loaded.config;
+    if (loaded.status == ConfigStatus::MigrationRequired &&
+        UserConfigStore::validate(config, product) == ConfigStatus::Ok) {
+        loaded.status = UserConfigStore::save(config);
+        if (loaded.status == ConfigStatus::Ok) {
+            ESP_LOGI(kTag, "Migrated user configuration to schema %u",
+                     static_cast<unsigned>(kUserConfigSchemaVersion));
+        }
+    }
     bool needsProvisioning =
         (loaded.status != ConfigStatus::Ok) ||
         (UserConfigStore::validate(config, product) != ConfigStatus::Ok);
@@ -92,11 +105,30 @@ void Application::run()
         return;
     }
 
+    RuntimeController runtime(*module);
+    if (!runtime.init()) {
+        ESP_LOGE(kTag, "Runtime controller init failed");
+        return;
+    }
+
+    ConnectorManager connectors;
+    if (!connectors.add(std::make_unique<RuntimeHttpConnector>(runtime, product)) ||
+        !connectors.add(std::make_unique<HomeAssistantMqttConnector>(runtime)) ||
+        !connectors.add(std::make_unique<MatterConnector>(runtime))) {
+        ESP_LOGE(kTag, "Connector registration failed");
+        return;
+    }
+    err = connectors.start(config);
+    if (err != ESP_OK) {
+        ESP_LOGW(kTag, "One or more connectors started degraded: %s", esp_err_to_name(err));
+    }
+
     ESP_LOGI(kTag, "Entering module run loop");
     TickType_t nextResetPoll = xTaskGetTickCount();
     const uint32_t resetHoldMs = CONFIG_OPENCOMFORT_FACTORY_RESET_HOLD_MS;
     while (true) {
-        module->run();
+        runtime.process();
+        connectors.tick();
         const TickType_t now = xTaskGetTickCount();
         if (now >= nextResetPoll) {
             nextResetPoll = now + pdMS_TO_TICKS(1000);

@@ -8,6 +8,10 @@ incorrectly can permanently lock a device.
 
 - Wi-Fi credentials are stored via ESP-IDF Wi-Fi NVS storage (not SPIFFS JSON).
 - User configuration uses dual-slot NVS commits.
+- MQTT credentials and the salted administrator credential are held in a
+  separate NVS namespace and are never returned by the runtime API.
+- The post-setup portal uses expiring in-memory sessions, CSRF tokens, bounded
+  requests, and login throttling.
 - Remotely downloaded AC profiles require:
   - HTTPS with certificate-bundle verification
   - SHA-256 integrity check
@@ -31,6 +35,8 @@ Reference:
 
 - `partitions-prod.csv` — includes an `nvs_keys` partition for NVS encryption
 - `sdkconfig.prod.defaults` — production overlays (apply intentionally)
+- `sdkconfig.matter.prod.defaults` — Matter credential-provider and production
+  security overlay for 16 MB hardware
 
 Example:
 
@@ -71,4 +77,14 @@ Hold the board factory-reset GPIO (rev-A default: GPIO0 / BOOT) for
 `CONFIG_OPENCOMFORT_FACTORY_RESET_HOLD_MS` (default 5s) at boot or during runtime.
 
 This clears user NVS config and Wi-Fi credentials, then restarts into the
-captive portal.
+captive portal. Connector secrets and Matter fabrics are also cleared.
+
+## Matter credentials
+
+Matter development passcodes and certificates are not product credentials.
+Production units require unique commissioning data and a valid DAC/PAI/CD
+chain injected into the `fctry` partition under controlled manufacturing key
+management. Disable
+`CONFIG_OPENCOMFORT_MATTER_DEVELOPMENT_CREDENTIALS`, enable the factory-data
+provider, and retain auditable mappings between serial numbers and injected
+identity. Never commit DAC private keys or generated factory partition images.
