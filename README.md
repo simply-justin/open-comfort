@@ -7,14 +7,20 @@ OpenComfort is modular ESP-IDF firmware for ESP32-S3 smart-home products.
 A flashed product definition selects the active module. The first module is
 an air-conditioner bridge.
 
-## What the MVP does
+## Current functionality
 
-1. Boots with an immutable product/module identity from Kconfig.
-2. Starts a WPA2 captive portal when the device is unprovisioned.
-3. Always configures Wi-Fi first.
-4. Continues with module-specific setup (AC make/model from a bundled catalog).
-5. Stores durable user configuration in NVS.
-6. Activates the protocol bus required by the selected AC profile.
+1. Immutable product/module identity from Kconfig.
+2. WPA2 captive portal for first-time setup (Wi-Fi first, then module steps).
+3. Durable NVS user configuration with dual-slot commits.
+4. AC make/model selection from a bundled catalog.
+5. Optional remote HTTPS profile catalog download with SHA-256 + ECDSA verification.
+6. Hardened UART / SPI / CAN transports with validation and RAII cleanup.
+7. AC protocol engine that encodes profile commands and polls data registers.
+8. Factory reset / re-provisioning via long-press on the board reset GPIO.
+9. Production security prep files for Secure Boot, flash encryption, and NVS encryption.
+
+Runtime control APIs (Home Assistant / MQTT / post-setup web UI) are intentionally
+not included yet.
 
 ## Development setup
 
@@ -55,18 +61,22 @@ Default SoftAP credentials for first-time setup:
 - SSID: `OpenComfort-XXXX`
 - Password: value of `CONFIG_OPENCOMFORT_PORTAL_AP_PASSWORD` (default `opencomfort`)
 
+Factory reset: hold GPIO0 (BOOT) for 5 seconds.
+
+See [SECURITY.md](SECURITY.md) for production hardening and profile signing.
+
 ## Project structure
 
 - `main/main.cpp`: firmware entry point
 - `main/src/Application/`: boot orchestration
 - `main/src/Product/`: immutable product and board definitions
-- `main/src/Config/`: durable NVS user configuration
+- `main/src/Config/`: durable NVS user configuration and factory reset
 - `main/src/Wifi/`: SoftAP / STA service
 - `main/src/Http/`: captive portal
 - `main/src/Setup/`: module setup providers
-- `main/src/Profiles/`: AC profile catalog and loader
+- `main/src/Profiles/`: AC profile catalog, crypto, HTTPS download
 - `main/src/Bus/`: hardened UART / SPI / CAN transports
-- `main/src/Modules/`: runtime modules
+- `main/src/Modules/`: runtime modules and AC protocol engine
 - `main/spiffs/www/`: portal UI assets
 - `main/spiffs/profiles/`: bundled AC catalog and profiles
 

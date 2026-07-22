@@ -11,6 +11,8 @@ constexpr size_t kMaxCatalogEntries = 32;
 constexpr size_t kMaxModelsPerProfile = 16;
 constexpr size_t kMaxMakeNameLen = 64;
 constexpr size_t kMaxUrlLen = 160;
+constexpr size_t kMaxShaHexLen = 64;
+constexpr size_t kMaxSignatureHexLen = 256;
 
 struct ProfileCatalogEntry {
     char id[49] = {};
@@ -21,6 +23,9 @@ struct ProfileCatalogEntry {
     BusKind bus = BusKind::Unknown;
     char profileVersion[17] = {};
     char relativePath[97] = {};
+    char url[kMaxUrlLen + 1] = {};
+    char sha256[kMaxShaHexLen + 1] = {};
+    char signature[kMaxSignatureHexLen + 1] = {};
     bool bundled = true;
 };
 
@@ -37,6 +42,7 @@ struct LoadedAcProfile {
     int baudOrClockHz = 0;
     uint8_t spiMode = 0;
     char profileVersion[17] = {};
+    char localPath[128] = {};
     bool valid = false;
 };
 

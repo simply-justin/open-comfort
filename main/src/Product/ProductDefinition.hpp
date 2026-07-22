@@ -37,6 +37,7 @@ struct BoardDefinition {
     BoardUartPins uart;
     BoardSpiPins spi;
     BoardCanPins can;
+    gpio_num_t factoryResetPin;
     int maxSpiClockHz;
     int maxUartBaud;
 };

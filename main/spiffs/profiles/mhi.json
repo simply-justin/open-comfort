@@ -14,6 +14,7 @@
     "mode": "mode0",
     "frequencyHz": 1000000
   },
+  "frameSize": 20,
   "capabilities": {
     "minTemp": 16,
     "maxTemp": 30,

@@ -4,6 +4,7 @@ idf_component_register(
         src/Application/Application.cpp
         src/Product/ProductDefinition.cpp
         src/Config/UserConfigStore.cpp
+        src/Config/FactoryReset.cpp
         src/Bus/BusConfig.cpp
         src/Bus/BusFactory.cpp
         src/Bus/UartTransport.cpp
@@ -13,8 +14,11 @@ idf_component_register(
         src/Http/CaptivePortal.cpp
         src/Setup/AcSetupProvider.cpp
         src/Profiles/ProfileRepository.cpp
+        src/Profiles/ProfileCrypto.cpp
+        src/Profiles/HttpDownloader.cpp
         src/Modules/ModuleFactory.cpp
         src/Modules/Ac/Ac.cpp
+        src/Modules/Ac/AcProtocolEngine.cpp
     INCLUDE_DIRS
         "."
     REQUIRES
@@ -23,10 +27,13 @@ idf_component_register(
         json
         esp_wifi
         esp_http_server
+        esp_http_client
+        esp_https_ota
         esp_netif
         esp_event
         driver
         vfs
+        mbedtls
 )
 
 spiffs_create_partition_image(storage spiffs FLASH_IN_PROJECT)

@@ -28,6 +28,7 @@ constexpr BoardDefinition kBoardRevA = {
             .txPin = GPIO_NUM_1,
             .rxPin = GPIO_NUM_2,
         },
+    .factoryResetPin = GPIO_NUM_0,
     .maxSpiClockHz = 1000000,
     .maxUartBaud = 115200,
 };

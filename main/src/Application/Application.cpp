@@ -2,6 +2,9 @@
 
 #include <memory>
 
+#include "sdkconfig.h"
+
+#include "src/Config/FactoryReset.hpp"
 #include "src/Config/UserConfigStore.hpp"
 #include "src/Http/CaptivePortal.hpp"
 #include "src/Modules/ModuleFactory.hpp"
@@ -43,6 +46,14 @@ void Application::run()
     ESP_LOGI(kTag, "Product=%s module=%s board=%s", product.productId, toString(product.module),
              product.board != nullptr ? product.board->revision : "unknown");
 
+    if (product.board != nullptr) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(FactoryReset::init(product.board->factoryResetPin));
+        // Hold BOOT/reset pin at power-on to wipe config and re-enter portal.
+        if (FactoryReset::checkAndPerform(CONFIG_OPENCOMFORT_FACTORY_RESET_HOLD_MS)) {
+            return;
+        }
+    }
+
     ConfigLoadResult loaded = UserConfigStore::load();
     UserConfig config = loaded.config;
     bool needsProvisioning =
@@ -65,6 +76,8 @@ void Application::run()
     err = WiFiService::startStationFromStorage(20000);
     if (err != ESP_OK) {
         ESP_LOGW(kTag, "STA connect failed at boot: %s", esp_err_to_name(err));
+    } else {
+        (void)ProfileRepository::refreshRemoteCatalog(product);
     }
 
     std::unique_ptr<IModule> module = ModuleFactory::create(product, config);
@@ -80,8 +93,17 @@ void Application::run()
     }
 
     ESP_LOGI(kTag, "Entering module run loop");
+    TickType_t nextResetPoll = xTaskGetTickCount();
+    const uint32_t resetHoldMs = CONFIG_OPENCOMFORT_FACTORY_RESET_HOLD_MS;
     while (true) {
         module->run();
+        const TickType_t now = xTaskGetTickCount();
+        if (now >= nextResetPoll) {
+            nextResetPoll = now + pdMS_TO_TICKS(1000);
+            if (FactoryReset::checkAndPerform(resetHoldMs)) {
+                return;
+            }
+        }
     }
 }
 

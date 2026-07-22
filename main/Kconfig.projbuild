@@ -39,4 +39,12 @@ menu "OpenComfort Product"
             Optional HTTPS URL for remote AC profile catalog retrieval.
             Leave empty to use the bundled SPIFFS catalog only.
 
+    config OPENCOMFORT_FACTORY_RESET_HOLD_MS
+        int "Factory reset hold time (ms)"
+        default 5000
+        range 1000 30000
+        help
+            How long the board factory-reset GPIO must be held to wipe
+            user configuration and re-enter the captive portal.
+
 endmenu
