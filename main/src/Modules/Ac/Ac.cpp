@@ -1,5 +1,6 @@
 #include "src/Modules/Ac/Ac.hpp"
 
+#include <cmath>
 #include <string>
 
 #include "src/Profiles/ProfileRepository.hpp"
@@ -88,13 +89,44 @@ bool AcModule::isBooted() const
     return booted_;
 }
 
-esp_err_t AcModule::setDesiredState(const AcDesiredState& desired)
+esp_err_t AcModule::applyRuntimeDesired(const AcDesiredState& desired)
 {
-    if (!booted_) {
+    if (!booted_ || !protocol_.isLoaded()) {
         return ESP_ERR_INVALID_STATE;
     }
-    desired_ = desired;
-    return protocol_.applyDesiredState(bus_, desired_);
+    const AcProtocolProfile& capabilities = protocol_.profile();
+    if (!std::isfinite(desired.targetTempC) ||
+        desired.targetTempC < static_cast<float>(capabilities.minTempC) ||
+        desired.targetTempC > static_cast<float>(capabilities.maxTempC) ||
+        static_cast<uint8_t>(desired.mode) > static_cast<uint8_t>(AcMode::Auto) ||
+        static_cast<uint8_t>(desired.fan) > static_cast<uint8_t>(AcFanSpeed::High)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t err = protocol_.applyDesiredState(bus_, desired);
+    if (err == ESP_OK) {
+        desired_ = desired;
+    }
+    return err;
+}
+
+RuntimeSnapshot AcModule::runtimeSnapshot() const
+{
+    RuntimeSnapshot snapshot;
+    snapshot.module = ModuleKind::Ac;
+    snapshot.available = booted_;
+    snapshot.desired = desired_;
+    snapshot.reported = reported_;
+    if (protocol_.isLoaded()) {
+        snapshot.acCapabilities.minTempC = protocol_.profile().minTempC;
+        snapshot.acCapabilities.maxTempC = protocol_.profile().maxTempC;
+    }
+    return snapshot;
+}
+
+esp_err_t AcModule::setDesiredState(const AcDesiredState& desired)
+{
+    return applyRuntimeDesired(desired);
 }
 
 AcDesiredState AcModule::desiredState() const

@@ -22,7 +22,10 @@ public:
     bool isBooted() const override;
     void run() override;
 
-    // Prepared for a future runtime control surface; safe to call now.
+    esp_err_t applyRuntimeDesired(const AcDesiredState& desired) override;
+    RuntimeSnapshot runtimeSnapshot() const override;
+
+    // Compatibility wrapper. Runtime connectors must use RuntimeController.
     esp_err_t setDesiredState(const AcDesiredState& desired);
     AcDesiredState desiredState() const;
     AcReportedState reportedState() const;
