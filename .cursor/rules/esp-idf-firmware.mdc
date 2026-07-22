@@ -1,0 +1,22 @@
+---
+description: OpenComfort ESP-IDF firmware development and hardware safety
+globs:
+  - "**/*.{c,cc,cpp,h,hpp}"
+  - "**/CMakeLists.txt"
+alwaysApply: false
+---
+
+- Target ESP32-S3 with ESP-IDF v5.5.1 and validate firmware changes with
+  `idf.py build`.
+- Register new component sources and include directories in the nearest
+  `CMakeLists.txt`.
+- Check ESP-IDF return values and make ownership and task lifetimes explicit.
+- Keep reusable modules independent of board-specific pins and transport
+  settings; obtain those values from configuration.
+- Avoid unbounded waits and blocking work in event handlers or FreeRTOS tasks.
+- Treat flashing, erasing, serial monitoring, and GPIO activation as hardware
+  operations. Do not perform them unless the task explicitly requires them and
+  the target device is known.
+- Never commit generated build output, `sdkconfig`, credentials, device paths,
+  or captured traffic containing secrets.
+- Follow the contribution and licensing requirements in `CONTRIBUTING.md`.
