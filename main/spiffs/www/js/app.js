@@ -8,6 +8,14 @@
     password: "",
     model: "",
     friendlyName: "OpenComfort",
+    mqttEnabled: false,
+    mqttHost: "",
+    mqttPort: 8883,
+    mqttTls: true,
+    mqttUsername: "",
+    mqttPassword: "",
+    matterEnabled: false,
+    adminPassword: "",
   };
 
   const title = document.getElementById("title");
@@ -63,7 +71,7 @@
   }
 
   function renderStepper() {
-    stepper.setSteps(["Wi‑Fi", "Product", "Finish"], state.step);
+    stepper.setSteps(["Wi‑Fi", "Product", "Connectors", "Finish"], state.step);
   }
 
   function renderWifi() {
@@ -135,7 +143,8 @@
         <button class="button-primary" id="productNext" type="button">Continue</button>
       </div>
     `;
-    document.getElementById("model").value = state.model || modelField.options[0]?.value || "";
+    state.model = state.model || modelField.options[0]?.value || "";
+    document.getElementById("model").value = state.model;
     document.getElementById("friendlyName").value = state.friendlyName;
     document.getElementById("model").addEventListener("change", (event) => {
       state.model = event.target.value;
@@ -150,6 +159,57 @@
     document.getElementById("productNext").addEventListener("click", submitProduct);
   }
 
+  function renderConnectors() {
+    title.textContent = "Choose integrations";
+    subtitle.textContent = "The local web portal stays available even without a smart-home service.";
+    panel.innerHTML = `
+      <div class="field checkbox-field">
+        <label><input id="mqttEnabled" type="checkbox" ${state.mqttEnabled ? "checked" : ""} />
+          Home Assistant via MQTT
+        </label>
+      </div>
+      <div id="mqttFields" ${state.mqttEnabled ? "" : "hidden"}>
+        <div class="field"><label for="mqttHost">MQTT broker</label><input id="mqttHost" maxlength="127" value="${state.mqttHost}" /></div>
+        <div class="field"><label for="mqttPort">Port</label><input id="mqttPort" type="number" min="1" max="65535" value="${state.mqttPort}" /></div>
+        <div class="field checkbox-field"><label><input id="mqttTls" type="checkbox" ${state.mqttTls ? "checked" : ""} /> Verify TLS certificate</label></div>
+        <div class="field"><label for="mqttUsername">Username</label><input id="mqttUsername" maxlength="64" autocomplete="username" value="${state.mqttUsername}" /></div>
+        <div class="field"><label for="mqttPassword">Password</label><input id="mqttPassword" type="password" maxlength="128" autocomplete="new-password" /></div>
+      </div>
+      <div class="field checkbox-field" ${state.session.matterSupported ? "" : "hidden"}>
+        <label><input id="matterEnabled" type="checkbox" ${state.matterEnabled ? "checked" : ""} />
+          Matter for Apple Home, Google Home, and compatible controllers
+        </label>
+      </div>
+      <div class="field">
+        <label for="adminPassword">Local portal password</label>
+        <input id="adminPassword" type="password" minlength="8" maxlength="64" autocomplete="new-password" />
+        <span class="muted">At least 8 characters. The physical reset button remains the recovery method.</span>
+      </div>
+      <div class="actions">
+        <button class="button-secondary" id="backBtn" type="button">Back</button>
+        <button class="button-primary" id="connectorsNext" type="button">Continue</button>
+      </div>`;
+    document.getElementById("mqttEnabled").addEventListener("change", (event) => {
+      state.mqttEnabled = event.target.checked;
+      renderConnectors();
+    });
+    ["mqttHost", "mqttPort", "mqttUsername", "mqttPassword", "adminPassword"].forEach((id) => {
+      const element = document.getElementById(id);
+      if (!element) return;
+      if (id === "mqttPassword" || id === "adminPassword") element.value = state[id];
+      element.addEventListener("input", (event) => {
+        state[id] = id === "mqttPort" ? Number(event.target.value) : event.target.value;
+      });
+    });
+    document.getElementById("mqttTls").addEventListener("change", (event) => {
+      state.mqttTls = event.target.checked;
+    });
+    const matter = document.getElementById("matterEnabled");
+    if (matter) matter.addEventListener("change", (event) => { state.matterEnabled = event.target.checked; });
+    document.getElementById("backBtn").addEventListener("click", () => { state.step = 1; render(); });
+    document.getElementById("connectorsNext").addEventListener("click", submitConnectors);
+  }
+
   function renderFinish() {
     title.textContent = "Ready to finish";
     subtitle.textContent = "Save the configuration and reboot into normal operation.";
@@ -161,7 +221,7 @@
       </div>
     `;
     document.getElementById("backBtn").addEventListener("click", () => {
-      state.step = 1;
+      state.step = 2;
       render();
     });
     document.getElementById("commitBtn").addEventListener("click", commitSetup);
@@ -172,7 +232,8 @@
     renderStepper();
     if (state.step === 0) renderWifi();
     if (state.step === 1) renderProduct();
-    if (state.step === 2) renderFinish();
+    if (state.step === 2) renderConnectors();
+    if (state.step === 3) renderFinish();
   }
 
   async function loadNetworks() {
@@ -218,6 +279,33 @@
         }),
       });
       state.step = 2;
+      render();
+    } catch (error) {
+      showError(error.message);
+    }
+  }
+
+  async function submitConnectors() {
+    clearError();
+    if (state.adminPassword.length < 8) {
+      showError("Use at least 8 characters for the local portal password.");
+      return;
+    }
+    try {
+      await api("/api/v1/setup/connectors", {
+        method: "PUT",
+        body: JSON.stringify({
+          mqttEnabled: state.mqttEnabled,
+          mqttHost: state.mqttHost,
+          mqttPort: state.mqttPort,
+          mqttTls: state.mqttTls,
+          mqttUsername: state.mqttUsername,
+          mqttPassword: state.mqttPassword,
+          matterEnabled: state.matterEnabled,
+          adminPassword: state.adminPassword,
+        }),
+      });
+      state.step = 3;
       render();
     } catch (error) {
       showError(error.message);

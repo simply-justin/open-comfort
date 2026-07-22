@@ -2,7 +2,9 @@
 
 #include "sdkconfig.h"
 
+#include "src/Config/ConnectorSecretStore.hpp"
 #include "src/Config/UserConfigStore.hpp"
+#include "src/Connectors/Matter/MatterPlatform.hpp"
 #include "src/Wifi/WiFiService.hpp"
 
 extern "C" {
@@ -46,6 +48,8 @@ esp_err_t FactoryReset::perform()
     ESP_LOGW(kTag, "Performing factory reset");
     UserConfigStore::init();
     UserConfigStore::clear();
+    ConnectorSecretStore::clear();
+    MatterPlatform::factoryReset();
 
     // Best-effort Wi-Fi credential wipe.
     if (WiFiService::init() == ESP_OK) {

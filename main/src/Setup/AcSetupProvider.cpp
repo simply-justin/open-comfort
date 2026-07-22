@@ -133,6 +133,7 @@ bool AcSetupProvider::finalize(const SetupDraft& draft, UserConfig& out, char* e
     copyBounded(out.ac.profileVersion, sizeof(out.ac.profileVersion), profile.profileVersion);
     copyBounded(out.ac.modelId, sizeof(out.ac.modelId), draft.modelId);
     out.ac.bus = profile.bus;
+    out.connectors = draft.connectors;
     return true;
 }
 
