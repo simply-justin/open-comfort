@@ -1,19 +1,39 @@
 idf_component_register(
     SRCS
         main.cpp
-
-        # Bus system
-        src/Busses/BusFactory.cpp
-        src/Busses/Uart.cpp
-        src/Busses/Spi.cpp
-        src/Busses/Can.cpp
-
+        src/Application/Application.cpp
+        src/Product/ProductDefinition.cpp
+        src/Config/UserConfigStore.cpp
+        src/Config/FactoryReset.cpp
+        src/Bus/BusConfig.cpp
+        src/Bus/BusFactory.cpp
+        src/Bus/UartTransport.cpp
+        src/Bus/SpiTransport.cpp
+        src/Bus/CanTransport.cpp
+        src/Wifi/WiFiService.cpp
         src/Http/CaptivePortal.cpp
-
-        # Modules
+        src/Setup/AcSetupProvider.cpp
+        src/Profiles/ProfileRepository.cpp
+        src/Profiles/ProfileCrypto.cpp
+        src/Profiles/HttpDownloader.cpp
         src/Modules/ModuleFactory.cpp
         src/Modules/Ac/Ac.cpp
-
+        src/Modules/Ac/AcProtocolEngine.cpp
     INCLUDE_DIRS
         "."
+    REQUIRES
+        nvs_flash
+        spiffs
+        json
+        esp_wifi
+        esp_http_server
+        esp_http_client
+        esp_https_ota
+        esp_netif
+        esp_event
+        driver
+        vfs
+        mbedtls
 )
+
+spiffs_create_partition_image(storage spiffs FLASH_IN_PROJECT)

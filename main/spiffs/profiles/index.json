@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "mitsubishi_heavy_industries",
+      "make": "mitsubishi-heavy-industries",
+      "makeName": "Mitsubishi Heavy Industries",
+      "models": [
+        "SRK25ZSX",
+        "SRK35ZSX",
+        "Generic"
+      ],
+      "bus": "spi",
+      "profileVersion": "1.0.0",
+      "path": "profiles/mhi.json",
+      "sha256": "37360adf827de8d772a5647424b8c787bb175855a2418d309a6b5830df62e622",
+      "bundled": true
+    }
+  ]
+}

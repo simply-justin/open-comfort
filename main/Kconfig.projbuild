@@ -1,0 +1,50 @@
+menu "OpenComfort Product"
+
+    config OPENCOMFORT_PRODUCT_ID
+        string "Product identifier"
+        default "oc-ac-controller-v1"
+        help
+            Immutable product identifier baked into the firmware image.
+
+    choice OPENCOMFORT_MODULE
+        prompt "Product module"
+        default OPENCOMFORT_MODULE_AC
+        help
+            Selects the functional module compiled into this firmware image.
+            Unused modules are excluded at link time.
+
+        config OPENCOMFORT_MODULE_AC
+            bool "Air conditioner bridge"
+    endchoice
+
+    choice OPENCOMFORT_BOARD
+        prompt "Board revision"
+        default OPENCOMFORT_BOARD_REV_A
+
+        config OPENCOMFORT_BOARD_REV_A
+            bool "Revision A (ESP32-S3)"
+    endchoice
+
+    config OPENCOMFORT_PORTAL_AP_PASSWORD
+        string "Default SoftAP password for portal"
+        default "opencomfort"
+        help
+            WPA2 SoftAP password used during first-time provisioning.
+            Prefer overriding per-device at manufacturing time.
+
+    config OPENCOMFORT_PROFILE_CATALOG_URL
+        string "Remote profile catalog URL"
+        default ""
+        help
+            Optional HTTPS URL for remote AC profile catalog retrieval.
+            Leave empty to use the bundled SPIFFS catalog only.
+
+    config OPENCOMFORT_FACTORY_RESET_HOLD_MS
+        int "Factory reset hold time (ms)"
+        default 5000
+        range 1000 30000
+        help
+            How long the board factory-reset GPIO must be held to wipe
+            user configuration and re-enter the captive portal.
+
+endmenu

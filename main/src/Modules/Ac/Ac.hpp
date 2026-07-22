@@ -1,52 +1,42 @@
 #pragma once
 
-#include <string>
+#include "esp_err.h"
+#include "freertos/FreeRTOS.h"
+
+#include "src/Bus/BusFactory.hpp"
+#include "src/Config/UserConfig.hpp"
+#include "src/Modules/Ac/AcProtocolEngine.hpp"
+#include "src/Modules/Ac/AcState.hpp"
 #include "src/Modules/IModule.hpp"
+#include "src/Product/ProductDefinition.hpp"
+#include "src/Profiles/ProfileTypes.hpp"
 
-/**
- * @file Ac.hpp
- * @brief Air-conditioner control module implementation.
- *
- * This module encapsulates the logic required to control an AC unit.
- * It is instantiated by ModuleFactory based on the device configuration.
- */
+namespace opencomfort {
 
-/**
- * @class Ac
- * @brief AC device module implementing the IModule lifecycle.
- *
- * The AC module manages initialization, state transitions,
- * communication with the underlying bus, and continuous runtime logic.
- */
-class Ac : public IModule {
+class AcModule final : public IModule {
 public:
-    Ac() = default;
-    ~Ac() override = default;
+    AcModule(const ProductDefinition& product, UserConfig config);
+    ~AcModule() override = default;
 
-    /**
-     * @brief Perform AC module initialization.
-     *
-     * Responsible for setting up communication channels, validating
-     * configuration, and preparing the AC logic for operation.
-     *
-     * Sets booted_ to true on success.
-     */
     void bootstrap() override;
-
-    /**
-     * @brief Returns true if the module has successfully booted.
-     */
-    bool isBooted() const override { return booted_; }
-
-    /**
-     * @brief Main AC control loop.
-     *
-     * Called repeatedly by the application. Responsible for
-     * executing temperature logic, reading/writing to the bus,
-     * and reacting to system events.
-     */
+    bool isBooted() const override;
     void run() override;
 
+    // Prepared for a future runtime control surface; safe to call now.
+    esp_err_t setDesiredState(const AcDesiredState& desired);
+    AcDesiredState desiredState() const;
+    AcReportedState reportedState() const;
+
 private:
-    bool booted_ = false; ///< Indicates successful module initialization.
+    const ProductDefinition& product_;
+    UserConfig config_;
+    LoadedAcProfile profile_{};
+    BusHandle bus_{};
+    AcProtocolEngine protocol_{};
+    AcDesiredState desired_{};
+    AcReportedState reported_{};
+    TickType_t nextPoll_ = 0;
+    bool booted_ = false;
 };
+
+}  // namespace opencomfort
