@@ -18,9 +18,9 @@ an air-conditioner bridge.
 7. AC protocol engine that encodes profile commands and polls data registers.
 8. Factory reset / re-provisioning via long-press on the board reset GPIO.
 9. Production security prep files for Secure Boot, flash encryption, and NVS encryption.
-
-Runtime control APIs (Home Assistant / MQTT / post-setup web UI) are intentionally
-not included yet.
+10. A serialized runtime API shared by an authenticated local portal, Home
+    Assistant MQTT discovery, and an optional Matter connector.
+11. Legacy 4 MB and Matter-capable 16 MB firmware profiles.
 
 ## Development setup
 
@@ -50,6 +50,10 @@ idf.py set-target esp32s3
 idf.py build
 ```
 
+The default build targets legacy 4 MB hardware. See
+[docs/runtime-api.md](docs/runtime-api.md) for the isolated 16 MB Matter build,
+connector setup, runtime endpoints, and manufacturing requirements.
+
 Flashing requires a connected ESP32-S3 and an explicit serial port:
 
 ```bash
@@ -73,6 +77,8 @@ See [SECURITY.md](SECURITY.md) for production hardening and profile signing.
 - `main/src/Config/`: durable NVS user configuration and factory reset
 - `main/src/Wifi/`: SoftAP / STA service
 - `main/src/Http/`: captive portal
+- `main/src/Runtime/`: serialized device state and command API
+- `main/src/Connectors/`: local web, Home Assistant MQTT, and Matter adapters
 - `main/src/Setup/`: module setup providers
 - `main/src/Profiles/`: AC profile catalog, crypto, HTTPS download
 - `main/src/Bus/`: hardened UART / SPI / CAN transports
