@@ -53,7 +53,11 @@ const ProductDefinition& currentProduct()
         .allowedBusCount = sizeof(kAcAllowedBuses) / sizeof(kAcAllowedBuses[0]),
         .portalApPassword = CONFIG_OPENCOMFORT_PORTAL_AP_PASSWORD,
         .profileCatalogUrl = CONFIG_OPENCOMFORT_PROFILE_CATALOG_URL,
-        .supportsMatter = CONFIG_OPENCOMFORT_ENABLE_MATTER,
+#if CONFIG_OPENCOMFORT_ENABLE_MATTER
+        .supportsMatter = true,
+#else
+        .supportsMatter = false,
+#endif
     };
     return kProduct;
 #else
