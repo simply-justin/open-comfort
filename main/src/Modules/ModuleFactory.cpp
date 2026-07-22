@@ -1,30 +1,31 @@
 #include "src/Modules/ModuleFactory.hpp"
+
 #include "src/Modules/Ac/Ac.hpp"
 
 extern "C" {
-    #include "esp_log.h"
+#include "esp_log.h"
 }
 
-static const char* TAG = "MODULE_FACTORY";
+namespace opencomfort {
+namespace {
+constexpr const char* kTag = "ModuleFactory";
+}
 
-/**
- * @brief Create a module instance based on the concrete type in ModuleConfig.
- *
- * Uses std::visit() to detect which configuration type is held by the variant
- * and constructs the corresponding module implementation.
- *
- * @return Unique pointer to a module, or nullptr if unsupported.
- */
-std::unique_ptr<IModule> ModuleFactory::create(const ModuleConfig& cfg)
+std::unique_ptr<IModule> ModuleFactory::create(const ProductDefinition& product,
+                                               const UserConfig& config)
 {
-    return std::visit([](const auto& concreteConfig) -> std::unique_ptr<IModule>
-    {
-        using T = std::decay_t<decltype(concreteConfig)>;
-
-        if constexpr (std::is_same_v<T, AcModuleConfig>) return std::make_unique<Ac>(concreteConfig);
-
-        ESP_LOGE(TAG, "Unknown module configuration type");
+    if (product.module != config.module) {
+        ESP_LOGE(kTag, "Config module does not match product module");
         return nullptr;
+    }
 
-    }, cfg);
+    switch (product.module) {
+        case ModuleKind::Ac:
+            return std::make_unique<AcModule>(product, config);
+        default:
+            ESP_LOGE(kTag, "Unsupported module");
+            return nullptr;
+    }
 }
+
+}  // namespace opencomfort

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "profileId": "mitsubishi_heavy_industries",
+  "profileVersion": "1.0.0",
+  "brand": "Mitsubishi Heavy Industries",
+  "models": [
+    "SRK25ZSX",
+    "SRK35ZSX",
+    "Generic"
+  ],
+  "protocol": {
+    "bus": "spi",
+    "bit_order": "MSB_FIRST",
+    "mode": "mode0",
+    "frequencyHz": 1000000
+  },
+  "capabilities": {
+    "minTemp": 16,
+    "maxTemp": 30,
+    "modes": ["cool", "heat", "dry", "fan", "auto"]
+  },
+  "data": [
+    { "name": "MODE", "bytes": ["C0", "02"] },
+    { "name": "SET-TEMP", "bytes": ["C0", "05"] },
+    { "name": "RETURN-AIR", "bytes": ["C0", "80"] },
+    { "name": "IU-FANSPEED", "bytes": ["C0", "1F"] }
+  ],
+  "commands": {
+    "set_power": [
+      { "field": "DB0", "binary_or": ["02", "$POWER"] }
+    ],
+    "set_mode": [
+      { "field": "DB0", "binary_or": ["20", "$MODE"] }
+    ],
+    "set_temperature": [
+      { "field": "DB2", "binary_or": ["80", "$TEMP"] }
+    ],
+    "set_fan_speed": [
+      { "field": "DB1", "binary_or": ["08", "$FAN"] }
+    ]
+  },
+  "families": {}
+}

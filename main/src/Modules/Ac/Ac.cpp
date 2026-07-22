@@ -1,55 +1,77 @@
 #include "src/Modules/Ac/Ac.hpp"
 
+#include "src/Profiles/ProfileRepository.hpp"
+
 extern "C" {
-    #include "esp_log.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 }
 
-static const char* TAG = "MODULE_AC";
-
-/**
- * @brief Perform AC module initialization.
- *
- * Responsible for preparing the AC control system:
- *   - loading the AC profile,
- *   - initializing the bus,
- *   - creating frame/command engines,
- *   - validating configuration.
- *
- * In this stub implementation, boot succeeds immediately.
- */
-void Ac::bootstrap() {
-    ESP_LOGI(TAG, "Booting AC module...");
-
-    // TODO: Load ACProfile from storage or embedded assets
-    // TODO: Initialize bus (IBus instance via BusFactory)
-    // TODO: Create and initialize FrameEngine / CommandEngine
-    // TODO: Validate profile + bus + protocol compatibility
-    // TODO: Set initial AC state and prepare runtime logic
-
-    booted_ = true;
-
-    ESP_LOGI(TAG, "AC module booted");
+namespace opencomfort {
+namespace {
+constexpr const char* kTag = "AcModule";
 }
 
-/**
- * @brief Main execution loop for the AC module.
- *
- * Executed repeatedly by the application. This function should be
- * non-blocking or cooperate with FreeRTOS scheduling.
- *
- * Typical responsibilities:
- *   - polling the bus for new frames,
- *   - updating AC state,
- *   - processing user or schedule commands,
- *   - sending protocol frames when needed.
- */
-void Ac::run() {
-    if (!booted_) {
-        ESP_LOGW(TAG, "run() called before module boot");
+AcModule::AcModule(const ProductDefinition& product, UserConfig config)
+    : product_(product), config_(std::move(config))
+{
+}
+
+void AcModule::bootstrap()
+{
+    booted_ = false;
+    ESP_LOGI(kTag, "Bootstrapping AC module profile=%s model=%s", config_.ac.profileId,
+             config_.ac.modelId);
+
+    if (ProfileRepository::ensureProfileAvailable(product_, config_.ac.profileId, profile_) !=
+        ESP_OK) {
+        ESP_LOGE(kTag, "Failed to load AC profile");
         return;
     }
 
-    // TODO: Periodic AC logic (FrameEngine->sendAndReceive(), decode frames, etc.)
-    // TODO: Handle time-based state updates or scheduled commands
-    // TODO: Push updates to device state or report telemetry
+    ProtocolBusParams protocol;
+    protocol.kind = profile_.bus;
+    protocol.baudOrClockHz = profile_.baudOrClockHz;
+    protocol.spiMode = profile_.spiMode;
+
+    BusConfigVariant busCfg;
+    const BusStatus mergeStatus = BusFactory::merge(product_, protocol, busCfg);
+    if (mergeStatus != BusStatus::Ok) {
+        ESP_LOGE(kTag, "Bus merge failed: %s", toString(mergeStatus));
+        return;
+    }
+
+    const BusStatus validateStatus = BusFactory::validateConfig(busCfg);
+    if (validateStatus != BusStatus::Ok) {
+        ESP_LOGE(kTag, "Bus validation failed: %s", toString(validateStatus));
+        return;
+    }
+
+    const BusResult opened = BusFactory::createOpen(busCfg, bus_);
+    if (!opened) {
+        ESP_LOGE(kTag, "Bus open failed: %s", toString(opened.status));
+        return;
+    }
+
+    config_.ac.bus = bus_.kind;
+    booted_ = true;
+    ESP_LOGI(kTag, "AC module booted on bus=%s", toString(bus_.kind));
 }
+
+bool AcModule::isBooted() const
+{
+    return booted_;
+}
+
+void AcModule::run()
+{
+    if (!booted_) {
+        return;
+    }
+
+    // MVP: keep the transport alive and yield. Protocol frame engine follows later.
+    vTaskDelay(pdMS_TO_TICKS(50));
+}
+
+}  // namespace opencomfort

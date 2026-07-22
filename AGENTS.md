@@ -49,15 +49,20 @@ Never flash a connected device as part of routine validation.
 ## Repository map
 
 - `main/main.cpp`: firmware entry point.
-- `main/src/Busses/`: UART, SPI, and CAN abstractions.
-- `main/src/Modules/`: module implementations and factories.
-- `main/src/Configs/`: runtime and persisted configuration.
+- `main/src/Application/`: boot orchestration.
+- `main/src/Product/`: immutable product/module identity.
+- `main/src/Config/`: NVS-backed user configuration.
+- `main/src/Wifi/`: SoftAP and station Wi-Fi service.
 - `main/src/Http/`: captive portal.
+- `main/src/Setup/`: dynamic module setup providers.
+- `main/src/Profiles/`: AC profile catalog and loader.
+- `main/src/Bus/`: UART, SPI, and CAN transports.
+- `main/src/Modules/`: module implementations and factories.
 - `main/spiffs/`: files packaged into the SPIFFS image.
 
 When adding source files, register them in `main/CMakeLists.txt`. Keep hardware
-pins and protocol values in configuration rather than embedding board-specific
-values in reusable modules.
+pins and protocol values in product/board definitions and validated profiles
+rather than embedding board-specific values in reusable modules.
 
 ## Change guidelines
 
