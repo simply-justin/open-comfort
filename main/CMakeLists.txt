@@ -42,7 +42,7 @@ idf_component_register(
         esp_http_client
         esp_https_ota
         mqtt
-        mdns
+        espressif__mdns
         esp_netif
         esp_event
         driver
