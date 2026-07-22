@@ -54,7 +54,8 @@ bool fromMatterMode(uint8_t value, AcDesiredState& desired)
 esp_err_t attributeUpdate(attribute::callback_type_t type, uint16_t endpointId, uint32_t clusterId,
                           uint32_t attributeId, esp_matter_attr_val_t* value, void*)
 {
-    if (type != PRE_UPDATE || endpointId != s_endpointId || s_runtime == nullptr ||
+    if (type != esp_matter::attribute::PRE_UPDATE || endpointId != s_endpointId ||
+        s_runtime == nullptr ||
         clusterId != Thermostat::Id) {
         return ESP_OK;
     }
