@@ -15,6 +15,7 @@ UART, SPI, or CAN directly.
   ```bash
   idf.py -B build-matter \
     -D OPENCOMFORT_MATTER_PROFILE=ON \
+    -D SDKCONFIG=sdkconfig.matter.local \
     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.matter.defaults" \
     build
   ```
@@ -74,6 +75,12 @@ Development builds visibly warn when development commissioning credentials are
 allowed. Production builds must apply `sdkconfig.matter.prod.defaults`, inject a
 unique discriminator/passcode and DAC/PAI/CD into the `fctry` partition, and
 manage Secure Boot and flash-encryption keys outside the repository.
+
+Operational Matter fabrics and counters use the separate `matter` NVS
+partition. Factory reset erases that partition while preserving manufacturing
+identity in `fctry`. Networking is supplied by OpenComfort captive provisioning
+through Matter's custom-network condition; the Matter stack does not take
+ownership of station credentials.
 
 The first Matter representation is a Thermostat endpoint for broad controller
 compatibility. The Matter Room Air Conditioner device type should remain a

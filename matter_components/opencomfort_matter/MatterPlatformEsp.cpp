@@ -9,6 +9,7 @@
 #include <app-common/zap-generated/ids/Clusters.h>
 #include <esp_log.h>
 #include <esp_matter.h>
+#include <nvs_flash.h>
 
 namespace opencomfort {
 namespace {
@@ -193,9 +194,13 @@ esp_err_t MatterPlatform::openCommissioningWindow()
 esp_err_t MatterPlatform::factoryReset()
 {
     if (s_running) {
-        esp_matter::factory_reset();
+        return esp_matter::factory_reset();
     }
-    return ESP_OK;
+    // Matter operational state is isolated from OpenComfort and factory data.
+    // Erasing the whole partition removes every fabric/KVS namespace while
+    // preserving DAC and onboarding data in the read-only fctry partition.
+    const esp_err_t err = nvs_flash_erase_partition(CONFIG_ESP_MATTER_NVS_PART_NAME);
+    return err == ESP_ERR_NOT_FOUND ? ESP_OK : err;
 }
 
 bool MatterPlatform::isRunning()
