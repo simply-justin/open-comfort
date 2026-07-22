@@ -1,7 +1,9 @@
 #include "src/Connectors/Mqtt/HomeAssistantMqttConnector.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 
 #include "sdkconfig.h"
 
