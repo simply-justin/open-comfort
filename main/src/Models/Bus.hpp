@@ -2,6 +2,7 @@
 
 #include <variant>
 #include <cstdint>
+#include <type_traits>
 
 /**
  * @file Bus.hpp
@@ -13,6 +14,7 @@
  * @brief UART / RS485 bus configuration.
  */
 struct UartConfig {
+    int port = 1;
     int txPin = -1;
     int rxPin = -1;
     int baudRate = 9600;
@@ -23,10 +25,13 @@ struct UartConfig {
  * @brief SPI bus configuration parameters.
  */
 struct SpiConfig {
+    int host = 2;
     int sckPin  = -1;
     int mosiPin = -1;
     int misoPin = -1;
-    int freqHz  = 1000000;
+    int csPin = -1;
+    int mode = 0;
+    int frequency = 1000000;
 };
 
 /**
@@ -37,6 +42,7 @@ struct CanConfig {
     int txPin = -1;
     int rxPin = -1;
     int baudRate = 500000;
+    uint32_t id = 0x100;
 };
 
 /**

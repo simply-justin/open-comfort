@@ -1,5 +1,7 @@
 #include "src/Busses/BusFactory.hpp"
 
+#include <type_traits>
+
 extern "C" {
     #include "esp_log.h"
 }
@@ -44,7 +46,7 @@ std::unique_ptr<IBus> BusFactory::create(const Bus& cfg)
 
         if constexpr (std::is_same_v<T, SpiConfig>)  return std::make_unique<Spi>(concreteConfig);
         if constexpr (std::is_same_v<T, UartConfig>) return std::make_unique<Uart>(concreteConfig);
-        if constexpr (std::is_same_v<T, CanConfig>)  return std::make_unique<Uart>(concreteConfig);
+        if constexpr (std::is_same_v<T, CanConfig>)  return std::make_unique<Can>(concreteConfig);
 
         ESP_LOGE(TAG, "Unknown Bus configuration type");
         return nullptr;

@@ -7,6 +7,18 @@
     "mode": "mode0"
   },
 
+  "temperature": {
+    "min": 16,
+    "max": 30
+  },
+
+  "frame": {
+    "enabled": true,
+    "header": ["FC", "01", "30", "01"],
+    "payloadLength": 18,
+    "checksum": "sum8"
+  },
+
   "data": [
     { "name": "MODE",            "bytes": ["C0", "02"] },
     { "name": "SET-TEMP",        "bytes": ["C0", "05"] },

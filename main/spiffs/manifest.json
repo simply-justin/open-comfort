@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "products": [
+    {
+      "id": "mitsubishi_heavy_industries",
+      "name": "Mitsubishi Heavy Industries",
+      "module": "ac",
+      "bus": "spi",
+      "profileUrl": "/spiffs/profiles/mitsubishi_heavy_industries.json",
+      "version": "1.0.0"
+    }
+  ]
+}

@@ -1,52 +1,57 @@
 #pragma once
 
+#include <array>
+#include <memory>
 #include <string>
+
+#include "src/Busses/IBus.hpp"
+#include "src/Configs/ModuleConfig.hpp"
 #include "src/Modules/IModule.hpp"
+#include "src/Modules/Ac/Commands/ProfileCommandEngine.hpp"
+#include "src/Modules/Ac/Models/AcProfile.hpp"
+#include "src/Modules/Ac/Models/State.hpp"
 
-/**
- * @file Ac.hpp
- * @brief Air-conditioner control module implementation.
- *
- * This module encapsulates the logic required to control an AC unit.
- * It is instantiated by ModuleFactory based on the device configuration.
- */
+struct AcCommand {
+    bool hasPower = false;
+    bool powerOn = false;
+    bool hasMode = false;
+    Mode mode = Mode::Off;
+    bool hasTargetTemp = false;
+    float targetTemp = 22.0f;
+    bool hasFanSpeed = false;
+    FanSpeed fanSpeed = FanSpeed::Auto;
+    bool hasHorizontalVane = false;
+    FanControlHorizontal horizontalVane = FanControlHorizontal::Center;
+    bool hasVerticalVane = false;
+    FanControlVertical verticalVane = FanControlVertical::Down_Center;
+};
 
-/**
- * @class Ac
- * @brief AC device module implementing the IModule lifecycle.
- *
- * The AC module manages initialization, state transitions,
- * communication with the underlying bus, and continuous runtime logic.
- */
 class Ac : public IModule {
 public:
     Ac() = default;
+    explicit Ac(const AcModuleConfig& config);
     ~Ac() override = default;
 
-    /**
-     * @brief Perform AC module initialization.
-     *
-     * Responsible for setting up communication channels, validating
-     * configuration, and preparing the AC logic for operation.
-     *
-     * Sets booted_ to true on success.
-     */
     void bootstrap() override;
-
-    /**
-     * @brief Returns true if the module has successfully booted.
-     */
     bool isBooted() const override { return booted_; }
-
-    /**
-     * @brief Main AC control loop.
-     *
-     * Called repeatedly by the application. Responsible for
-     * executing temperature logic, reading/writing to the bus,
-     * and reacting to system events.
-     */
     void run() override;
 
+    const State& state() const { return state_; }
+    const AcModuleConfig& config() const { return config_; }
+    const AcProfile& profile() const { return profile_; }
+    bool applyCommand(const AcCommand& command, std::string* error = nullptr);
+
 private:
-    bool booted_ = false; ///< Indicates successful module initialization.
+    bool initBus(std::string* error);
+    bool sendPayload(std::string* error);
+    bool executeProfileCommand(const std::string& name, const CommandVars& vars, std::string* error);
+    void pollTelemetry();
+
+    AcModuleConfig config_;
+    AcProfile profile_;
+    State state_;
+    std::array<uint8_t, ProfileCommandEngine::kDbFieldCount> dbFields_{};
+    std::unique_ptr<IBus> bus_;
+    bool booted_ = false;
+    uint32_t runTicks_ = 0;
 };

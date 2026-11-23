@@ -1,8 +1,8 @@
 #pragma once
 
-#include "src/Modulces/Ac/Enums/Mode.hpp"
-#include "src/Modulces/Ac/Enums/FanSpeed.hpp"
-#include "src/Modulces/Ac/Enums/FanControl.hpp"
+#include "src/Modules/Ac/Enums/Mode.hpp"
+#include "src/Modules/Ac/Enums/FanSpeed.hpp"
+#include "src/Modules/Ac/Enums/FanControl.hpp"
 
 /**
  * @file State.hpp

@@ -1,6 +1,8 @@
 #include "src/Modules/ModuleFactory.hpp"
 #include "src/Modules/Ac/Ac.hpp"
 
+#include <type_traits>
+
 extern "C" {
     #include "esp_log.h"
 }

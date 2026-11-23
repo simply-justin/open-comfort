@@ -16,6 +16,7 @@ Spi::Spi(const SpiConfig& c)
  * Only MOSI/MISO/SCK are configured; quad pins remain unused.
  */
 bool Spi::init() {
+    const spi_host_device_t host = static_cast<spi_host_device_t>(cfg.host);
     spi_bus_config_t buscfg = {
         .mosi_io_num = cfg.mosiPin,
         .miso_io_num = cfg.misoPin,
@@ -26,7 +27,7 @@ bool Spi::init() {
     };
 
     // Initialize the SPI bus
-    if (spi_bus_initialize(cfg.host, &buscfg, SPI_DMA_CH_AUTO) != ESP_OK) {
+    if (spi_bus_initialize(host, &buscfg, SPI_DMA_CH_AUTO) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize SPI bus");
         return false;
     }
@@ -40,7 +41,7 @@ bool Spi::init() {
     };
 
     // Attach the SPI device
-    if (spi_bus_add_device(cfg.host, &devcfg, &handle) != ESP_OK) {
+    if (spi_bus_add_device(host, &devcfg, &handle) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to add SPI device");
         return false;
     }

@@ -1,32 +1,30 @@
 #pragma once
 
-#include "src/Models/UserConfig.hpp"
-#include "src/Board/BoardProfile.hpp"
+#include "src/Configs/DeviceConfig.hpp"
+
+extern "C" {
+    #include "esp_http_server.h"
+}
 
 /**
- * @brief Captive portal that creates a UserConfig.
- *
- * Steps:
- *  1) WiFi credentials
- *  2) Product/module selection (filtered by BoardProfile)
- *  3) Module-specific setup (dynamic)
- *  4) Save config (NVS "user") and return
+ * @brief First-boot setup portal that creates a DeviceConfig.
  */
 class CaptivePortal {
 public:
-    explicit CaptivePortal(const BoardProfile& boardProfile);
-
-    UserConfig run();
+    CaptivePortal() = default;
+    DeviceConfig run();
 
 private:
-    BoardProfile boardProfile_;
-    UserConfig working_;
+    DeviceConfig result_;
+    httpd_handle_t server_ = nullptr;
 
     bool finished_ = false;
 
     void startSoftAp();
-    void stopSoftAp();
-
     void startHttpServer();
     void stopHttpServer();
+
+    static esp_err_t rootHandler(httpd_req_t* req);
+    static esp_err_t productsHandler(httpd_req_t* req);
+    static esp_err_t setupHandler(httpd_req_t* req);
 };

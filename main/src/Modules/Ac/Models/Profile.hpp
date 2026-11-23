@@ -4,6 +4,8 @@
 #include <vector>
 #include <map>
 
+#include "src/Enums/BusType.hpp"
+#include "src/Models/Bus.hpp"
 #include "src/Modules/Ac/Enums/Mode.hpp"
 #include "src/Modules/Ac/Enums/FanSpeed.hpp"
 
@@ -25,7 +27,7 @@ struct Profile {
     std::string brand;                          ///< Brand name (e.g., "Daikin", "Midea")
     std::vector<std::string> modelNumbers;      ///< List of associated model numbers
 
-    BusType protocol_bus;                       ///< Communication protocol ("UART", "RS485", "IR")
+    BusType protocol_bus = BusType::UNKNOWN;    ///< Communication protocol ("UART", "RS485", "IR")
     Bus bus;                                    ///< UART/RS485 settings (if applicable)
 
     int minTemp = 16;                           ///< Minimum allowed setpoint temperature
@@ -43,4 +45,6 @@ struct Profile {
      * Values represent protocol-specific command sequences as strings.
      */
     std::map<std::string, std::vector<std::string>> commandTemplates;
+    std::map<std::string, std::map<std::string, std::vector<std::string>>> modelCommands;
+    std::map<std::string, std::map<std::string, std::vector<std::string>>> familyCommands;
 };

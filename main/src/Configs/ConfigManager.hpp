@@ -1,6 +1,7 @@
 #pragma once
 
-#include <optional>
+#include <string>
+
 #include "src/Configs/DeviceConfig.hpp"
 
 /**
@@ -31,6 +32,11 @@ public:
      * @return true on success, false otherwise.
      */
     static bool save(const DeviceConfig& cfg);
+
+    static bool validate(const DeviceConfig& cfg, std::string* reason = nullptr);
+    static bool writeTextFile(const char* path, const std::string& data);
+    static std::string readTextFile(const char* path);
+    static constexpr const char* configPath() { return kConfigPath; }
 
 private:
     static constexpr const char* kConfigPath = "/spiffs/config.json";

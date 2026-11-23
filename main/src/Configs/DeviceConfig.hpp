@@ -21,12 +21,15 @@
  * to ModuleFactory to select and construct the appropriate module.
  */
 struct DeviceConfig {
+    int configVersion = 1;
     std::string friendlyName = "OpenComfort Device";
     bool isValid = false;
 
-    // Wi-Fi station credentials (for connecting to user’s network after setup)
+    // Wi-Fi station credentials for connecting after setup.
     std::string wifiSsid;
     std::string wifiPassword;
+
+    std::string selectedProductId;
 
     ModuleConfig moduleConfig;
 };

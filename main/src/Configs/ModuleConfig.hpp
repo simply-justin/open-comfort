@@ -2,6 +2,9 @@
 
 #include <variant>
 #include <cstdint>
+#include <string>
+
+#include "src/Models/Bus.hpp"
 
 /**
  * @file ModuleConfig.hpp
@@ -12,14 +15,29 @@
  * is consumed by ModuleFactory to construct the correct module.
  */
 
+enum class ModuleType {
+    Ac
+};
+
+struct RemoteProfileMetadata {
+    std::string manifestUrl;
+    std::string profileUrl;
+    std::string profileVersion;
+    std::string checksum;
+};
+
 /**
  * @struct AcModuleConfig
  * @brief Configuration for the AC module.
- *
- * Currently empty, but intended to hold profile IDs, hardware parameters,
- * or other AC-specific configuration in future versions.
  */
-struct AcModuleConfig {};
+struct AcModuleConfig {
+    ModuleType type = ModuleType::Ac;
+    std::string productId = "mitsubishi_heavy_industries";
+    std::string acProfilePath = "/spiffs/profiles/mitsubishi_heavy_industries.json";
+    std::string acFriendlyName = "Air Conditioner";
+    Bus bus = SpiConfig{};
+    RemoteProfileMetadata remote;
+};
 
 /**
  * @brief Variant type containing all possible module configurations.
