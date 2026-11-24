@@ -1,4 +1,16 @@
-# Production security enablement for OpenComfort
+# Security
+
+## Reporting a vulnerability
+
+Please do **not** open a public issue for security problems. Report them privately through [GitHub Security Advisories](https://github.com/simply-justin/open-comfort/security/advisories/new), with steps to reproduce and the firmware commit you tested.
+
+## Development defaults to be aware of
+
+- The setup network uses a WPA2 password that is the same on every device unless `CONFIG_OPENCOMFORT_PORTAL_AP_PASSWORD` is overridden per device.
+- The runtime portal is plain HTTP on the local network. Keep devices on a trusted LAN or IoT network and never forward the port to the internet.
+- Flash encryption and Secure Boot are off by default, so anyone with physical access can read the flash.
+
+# Production security enablement
 
 This repository keeps **development defaults safe**. Flash encryption and
 Secure Boot are **not** enabled in `sdkconfig.defaults` because enabling them
