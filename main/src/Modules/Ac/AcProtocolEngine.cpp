@@ -273,6 +273,24 @@ uint8_t AcProtocolEngine::encodePlaceholder(AcPlaceholder placeholder,
     }
 }
 
+uint8_t AcProtocolEngine::placeholderMask(AcPlaceholder placeholder) const
+{
+    switch (placeholder) {
+        case AcPlaceholder::Power: return 0x01;
+        case AcPlaceholder::Mode: return 0x07;
+        case AcPlaceholder::Fan: return 0x03;
+        case AcPlaceholder::Temp: {
+            // Every bit an encoded setpoint (clamped to maxTempC) can occupy.
+            uint8_t mask = 0;
+            while (mask < profile_.maxTempC && mask != 0xFF) {
+                mask = static_cast<uint8_t>((mask << 1) | 1);
+            }
+            return mask;
+        }
+        default: return 0x00;
+    }
+}
+
 esp_err_t AcProtocolEngine::applyCommand(const char* name, const AcDesiredState& desired)
 {
     const AcCommandDef* command = findCommand(name);
@@ -290,8 +308,11 @@ esp_err_t AcProtocolEngine::applyCommand(const char* name, const AcDesiredState&
             value = encodePlaceholder(op.placeholder, desired);
         }
         if (op.kind == AcOpKind::BinaryOr) {
-            workingFrame_[op.fieldIndex] =
-                static_cast<uint8_t>(workingFrame_[op.fieldIndex] | op.literalMask | value);
+            // Clear the placeholder's own bit range first: a plain OR can set bits but never
+            // clear them, so power-off or a mode change would be lost once a bit was set.
+            const uint8_t domain = placeholderMask(op.placeholder);
+            uint8_t& field = workingFrame_[op.fieldIndex];
+            field = static_cast<uint8_t>((field & ~domain) | op.literalMask | value);
         } else {
             workingFrame_[op.fieldIndex] = value;
         }

@@ -22,6 +22,7 @@ private:
     uint8_t workingFrame_[kMaxAcFrameBytes] = {};
 
     const AcCommandDef* findCommand(const char* name) const;
+    uint8_t placeholderMask(AcPlaceholder placeholder) const;
     uint8_t encodePlaceholder(AcPlaceholder placeholder, const AcDesiredState& desired) const;
     esp_err_t applyCommand(const char* name, const AcDesiredState& desired);
     BusResult transmitFrame(BusHandle& bus, const uint8_t* data, size_t len);
