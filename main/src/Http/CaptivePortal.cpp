@@ -198,6 +198,13 @@ esp_err_t handleSession(httpd_req_t* req)
     cJSON_AddBoolToObject(json, "moduleConfigured", g_ctx->moduleConfigured);
     cJSON_AddBoolToObject(json, "connectorsConfigured", g_ctx->connectorsConfigured);
     cJSON_AddBoolToObject(json, "matterSupported", g_ctx->product->supportsMatter);
+    // Same derivation as RuntimeHttpConnector::startMdns, so setup can show the runtime address.
+    uint8_t mac[6] = {};
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
+        char hostname[32];
+        std::snprintf(hostname, sizeof(hostname), "opencomfort-%02x%02x.local", mac[4], mac[5]);
+        cJSON_AddStringToObject(json, "hostname", hostname);
+    }
     return sendJson(req, json);
 }
 

@@ -54,12 +54,11 @@ A device without a valid configuration starts the captive portal:
 
 1. Join the Wi-Fi network **`OpenComfort-XXXX`** (the last four hex digits of the MAC address). The password is `CONFIG_OPENCOMFORT_PORTAL_AP_PASSWORD`, `opencomfort` by default.
 2. Your phone or laptop should open the setup page by itself. If it does not, browse to `http://192.168.4.1`.
-3. Work through the steps:
-   1. Choose your Wi-Fi network from the scan list and enter its password.
-   2. Choose the make and model of your air conditioner.
-   3. Set an administrator password for the runtime portal.
-   4. Optionally enable Home Assistant MQTT or Matter.
-4. Confirm. The device saves the configuration and restarts.
+3. Work through the three steps:
+   1. **Network.** Pick your Wi-Fi from the scan list and enter its password. Use **Other…** for a hidden network.
+   2. **Air conditioner.** Pick your model and give the device a name.
+   3. **Secure and connect.** Set the portal password and optionally enable Home Assistant MQTT or Matter.
+4. Tap **Finish setup**. The device saves the configuration, shows its address and restarts.
 
 ## 5. Open the runtime portal
 
