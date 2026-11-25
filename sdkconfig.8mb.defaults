@@ -1,0 +1,3 @@
+# Matter or Full build on 8 MB flash. Apply last.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-matter-8mb.csv"
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y

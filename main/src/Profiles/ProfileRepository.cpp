@@ -2,6 +2,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <new>
 #include <string>
 
 #include "src/Profiles/HttpDownloader.hpp"
@@ -297,7 +299,9 @@ esp_err_t ProfileRepository::initSpiffs()
 
 esp_err_t ProfileRepository::loadCatalog(ProfileCatalog& out)
 {
-    out = ProfileCatalog{};
+    // Reset in place: assigning ProfileCatalog{} builds a ~50 KB temporary on the stack.
+    out.~ProfileCatalog();
+    new (&out) ProfileCatalog();
     esp_err_t err = initSpiffs();
     if (err != ESP_OK) {
         return err;
@@ -365,13 +369,16 @@ esp_err_t ProfileRepository::loadProfile(const char* profileId, LoadedAcProfile&
         return ESP_ERR_INVALID_ARG;
     }
 
-    ProfileCatalog catalog;
-    esp_err_t err = loadCatalog(catalog);
+    std::unique_ptr<ProfileCatalog> catalog(new (std::nothrow) ProfileCatalog());
+    if (!catalog) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t err = loadCatalog(*catalog);
     if (err != ESP_OK) {
         return err;
     }
 
-    const ProfileCatalogEntry* match = findEntry(catalog, profileId);
+    const ProfileCatalogEntry* match = findEntry(*catalog, profileId);
     if (match == nullptr) {
         return ESP_ERR_NOT_FOUND;
     }
@@ -423,9 +430,9 @@ esp_err_t ProfileRepository::ensureProfileAvailable(const ProductDefinition& pro
     // Attempt remote catalog refresh + download when configured.
     if (product.profileCatalogUrl != nullptr && product.profileCatalogUrl[0] != '\0') {
         (void)refreshRemoteCatalog(product);
-        ProfileCatalog catalog;
-        if (loadCatalog(catalog) == ESP_OK) {
-            const ProfileCatalogEntry* match = findEntry(catalog, profileId);
+        std::unique_ptr<ProfileCatalog> catalog(new (std::nothrow) ProfileCatalog());
+        if (catalog && loadCatalog(*catalog) == ESP_OK) {
+            const ProfileCatalogEntry* match = findEntry(*catalog, profileId);
             if (match != nullptr && match->url[0] != '\0') {
                 err = downloadProfile(*match, out);
                 if (err == ESP_OK) {

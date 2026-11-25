@@ -44,7 +44,9 @@ A failed Wi-Fi connection at boot is logged and the device keeps running, so the
 | Modules | `main/src/Modules/` | `IModule`, `ModuleFactory`, the AC module and `AcProtocolEngine` |
 | Runtime | `main/src/Runtime/` | Canonical desired and reported state, command queue |
 | Connectors | `main/src/Connectors/` | Local web portal, Home Assistant MQTT, Matter |
-| Web assets | `main/spiffs/www/` | Setup and runtime portal UI |
+| Schedule | `main/src/Schedule/` | Timed rules and the sleep timer, SNTP and time zone |
+| Third-party | `main/src/ThirdParty/` | Nayuki `qrcodegen` (MIT), for the Matter QR code |
+| Web assets | `main/www/` | Setup and runtime portal UI and the Geist font (SIL OFL 1.1, `main/www/fonts/OFL.txt`), embedded in the app image so OTA updates include it |
 | Bundled profiles | `main/spiffs/profiles/` | `index.json` catalog and profile files |
 | Tests | `main/test/` | Unity tests for the runtime and connector manager |
 
@@ -78,7 +80,7 @@ Pins come from the board definition in `main/src/Product/ProductDefinition.cpp`,
 | Function | Pins |
 |---|---|
 | UART | port 1, TX GPIO17, RX GPIO18 |
-| SPI | SPI2, SCK GPIO12, MOSI GPIO11, MISO GPIO13, CS GPIO10, max 1 MHz |
+| SPI | SPI2, SCK GPIO12, MOSI GPIO11, MISO GPIO13, CS GPIO10 for master-mode profiles, max 1 MHz. MHI CNS takes its clock from the unit and uses no CS wire |
 | CAN (TWAI) | TX GPIO1, RX GPIO2 |
 | Factory reset | GPIO0 (BOOT) |
 
@@ -86,9 +88,12 @@ Pins come from the board definition in `main/src/Product/ProductDefinition.cpp`,
 
 | Profile | File | Layout |
 |---|---|---|
-| Legacy 4 MB | `partitions.csv` | NVS, one factory app (1.875 MB), 1 MB SPIFFS |
-| Matter 16 MB | `partitions-matter-16mb.csv` | NVS, `nvs_keys`, `fctry`, `matter`, two 5 MB OTA slots, 2 MB SPIFFS, core dump |
+| Home Assistant 4 MB | `partitions.csv` | NVS, two 1.5 MB OTA slots, 896 KB SPIFFS |
+| Matter / Full 8 MB | `partitions-matter-8mb.csv` | Same partitions as 16 MB, two 2.94 MB OTA slots, 1.9 MB SPIFFS, core dump |
+| Matter / Full 16 MB | `partitions-matter-16mb.csv` | NVS, `nvs_keys`, `fctry`, `matter`, two 5 MB OTA slots, 2 MB SPIFFS, core dump |
 | Production 4 MB | `partitions-prod.csv` | Legacy layout plus an encrypted `nvs_keys` partition |
+
+Firmware updates go to the inactive OTA slot. App rollback is enabled: a new image is kept only after it has started Wi-Fi, the module and the connectors (or reached setup); otherwise the bootloader returns to the previous image on the next reset.
 
 ## Extending the firmware
 

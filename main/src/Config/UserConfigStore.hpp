@@ -1,6 +1,7 @@
 #pragma once
 
 #include "src/Config/UserConfig.hpp"
+#include "src/Modules/Ac/AcState.hpp"
 #include "src/Product/ProductDefinition.hpp"
 
 namespace opencomfort {
@@ -33,6 +34,7 @@ struct ConfigLoadResult {
 };
 
 UserConfig migrateUserConfigV1(const UserConfigV1& source);
+UserConfig migrateUserConfigV2(const UserConfigV2& source);
 
 class UserConfigStore {
 public:
@@ -41,6 +43,11 @@ public:
     static ConfigStatus save(const UserConfig& config);
     static ConfigStatus clear();
     static ConfigStatus validate(const UserConfig& config, const ProductDefinition& product);
+
+    // Last applied AC state, so a restart restores it instead of resetting the unit.
+    // Lives in the user namespace, so a factory reset clears it too.
+    static bool loadAcDesired(AcDesiredState& out);
+    static ConfigStatus saveAcDesired(const AcDesiredState& state);
 };
 
 }  // namespace opencomfort

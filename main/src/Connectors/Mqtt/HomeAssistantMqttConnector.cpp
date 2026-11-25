@@ -1,5 +1,8 @@
 #include "src/Connectors/Mqtt/HomeAssistantMqttConnector.hpp"
 
+#include "src/Schedule/ScheduleService.hpp"
+#include "src/Update/UpdateService.hpp"
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -11,7 +14,9 @@ extern "C" {
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
+#include "esp_app_desc.h"
 #include "esp_mac.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
@@ -21,6 +26,32 @@ namespace opencomfort {
 namespace {
 
 constexpr const char* kTag = "HomeAssistantMqtt";
+
+struct SleepOption {
+    const char* label;
+    uint32_t minutes;
+};
+constexpr SleepOption kSleepOptions[] = {{"Off", 0}, {"30 min", 30}, {"1 h", 60}, {"2 h", 120}, {"4 h", 240}};
+
+// The sleep timer counts down, so show the smallest option that still covers what is left.
+const char* sleepLabel(uint32_t secondsLeft)
+{
+    if (secondsLeft == 0) return kSleepOptions[0].label;
+    for (const SleepOption& option : kSleepOptions) {
+        if (option.minutes * 60 >= secondsLeft) return option.label;
+    }
+    return kSleepOptions[4].label;
+}
+
+// True when `topic` is "<base>/<suffix>".
+bool topicIs(const char* topic, int length, const char* base, const char* suffix)
+{
+    const size_t baseLength = std::strlen(base);
+    const size_t suffixLength = std::strlen(suffix);
+    return static_cast<size_t>(length) == baseLength + 1 + suffixLength &&
+           std::strncmp(topic, base, baseLength) == 0 && topic[baseLength] == '/' &&
+           std::strncmp(topic + baseLength + 1, suffix, suffixLength) == 0;
+}
 
 const char* modeName(AcMode mode)
 {
@@ -67,13 +98,6 @@ bool parseFan(const char* value, AcFanSpeed& fan)
     else if (std::strcmp(value, "high") == 0) fan = AcFanSpeed::High;
     else return false;
     return true;
-}
-
-bool topicEquals(const char* topic, int topicLength, const char* expected)
-{
-    const size_t expectedLength = std::strlen(expected);
-    return topicLength == static_cast<int>(expectedLength) &&
-           std::memcmp(topic, expected, expectedLength) == 0;
 }
 
 }  // namespace
@@ -201,6 +225,10 @@ void HomeAssistantMqttConnector::tick()
     }
     if (status_.state == ConnectorState::Running) {
         publishState(false);
+        if (static_cast<int32_t>(now - nextExtrasAt_) >= 0) {
+            nextExtrasAt_ = now + pdMS_TO_TICKS(15000);
+            publishExtras();
+        }
     }
 }
 
@@ -244,37 +272,82 @@ void HomeAssistantMqttConnector::onConnected()
     status_.lastError = ESP_OK;
     reconnectAt_ = 0;
     reconnectDelayMs_ = 1000;
-    esp_mqtt_client_subscribe(client_, modeCommandTopic_, 1);
-    esp_mqtt_client_subscribe(client_, temperatureCommandTopic_, 1);
-    esp_mqtt_client_subscribe(client_, fanCommandTopic_, 1);
+    char topic[128];
+    std::snprintf(topic, sizeof(topic), "%s/+/set", baseTopic_);
+    esp_mqtt_client_subscribe(client_, topic, 1);
+    std::snprintf(topic, sizeof(topic), "%s/update/install", baseTopic_);
+    esp_mqtt_client_subscribe(client_, topic, 1);
+    // Home Assistant's birth message: re-announce after it restarts.
+    esp_mqtt_client_subscribe(client_, haStatusTopic_, 1);
     publishDiscovery();
     esp_mqtt_client_publish(client_, availabilityTopic_, "online", 0, 1, 1);
     publishState(true);
+    publishExtras();
 }
 
 void HomeAssistantMqttConnector::onData(const char* topic, int topicLength, const char* data,
                                         int dataLength)
 {
-    if (dataLength <= 0 || dataLength > 32) {
+    if (dataLength <= 0 || dataLength > 32 || topic == nullptr) {
         return;
     }
     char value[33] = {};
     std::memcpy(value, data, static_cast<size_t>(dataLength));
+
+    if (static_cast<size_t>(topicLength) == std::strlen(haStatusTopic_) &&
+        std::strncmp(topic, haStatusTopic_, static_cast<size_t>(topicLength)) == 0) {
+        if (std::strcmp(value, "online") == 0) {
+            publishDiscovery();
+            publishState(true);
+            publishExtras();
+        }
+        return;
+    }
+    if (topicIs(topic, topicLength, baseTopic_, "sleep/set")) {
+        for (const SleepOption& option : kSleepOptions) {
+            if (std::strcmp(value, option.label) == 0) {
+                ScheduleService::instance().setSleepMinutes(option.minutes);
+                nextExtrasAt_ = 0;  // show the new choice right away
+            }
+        }
+        return;
+    }
+    if (topicIs(topic, topicLength, baseTopic_, "update/install")) {
+        if (std::strcmp(value, "install") == 0) (void)UpdateService::instance().installNow();
+        nextExtrasAt_ = 0;
+        return;
+    }
+
     AcDesiredState desired = runtime_.snapshot().desired;
     bool valid = false;
-    if (topicEquals(topic, topicLength, modeCommandTopic_)) {
+    if (topicIs(topic, topicLength, baseTopic_, "mode/set")) {
         valid = parseMode(value, desired.mode);
         if (valid) {
             desired.powerOn = desired.mode != AcMode::Off;
         }
-    } else if (topicEquals(topic, topicLength, fanCommandTopic_)) {
+    } else if (topicIs(topic, topicLength, baseTopic_, "power/set")) {
+        valid = std::strcmp(value, "ON") == 0 || std::strcmp(value, "OFF") == 0;
+        if (valid) {
+            desired.powerOn = value[1] == 'N';
+            // Turning on keeps the last mode; "off" is not a mode to resume into.
+            if (desired.powerOn && desired.mode == AcMode::Off) desired.mode = AcMode::Auto;
+        }
+    } else if (topicIs(topic, topicLength, baseTopic_, "fan/set")) {
         valid = parseFan(value, desired.fan);
-    } else if (topicEquals(topic, topicLength, temperatureCommandTopic_)) {
+    } else if (topicIs(topic, topicLength, baseTopic_, "swing/set")) {
+        const AcRuntimeCapabilities caps = runtime_.snapshot().acCapabilities;
+        for (size_t i = 0; i < caps.vaneCount; ++i) {
+            if (std::strcmp(caps.vaneNames[i], value) == 0) {
+                desired.vanes = static_cast<uint8_t>(i);
+                valid = true;
+            }
+        }
+    } else if (topicIs(topic, topicLength, baseTopic_, "temperature/set")) {
         char* end = nullptr;
         const float temperature = std::strtof(value, &end);
         valid = end != value && *end == '\0';
         if (valid) {
-            desired.targetTempC = temperature;
+            desired.targetTempC = static_cast<float>(static_cast<int>(temperature + 0.5f));
         }
     }
     if (valid) {
@@ -282,56 +355,145 @@ void HomeAssistantMqttConnector::onData(const char* topic, int topicLength, cons
     }
 }
 
+void HomeAssistantMqttConnector::publishEntity(const char* component, const char* object, cJSON* json)
+{
+    // Shared fields: "~" abbreviates the base topic; identifiers attach it to the device.
+    cJSON_AddStringToObject(json, "~", baseTopic_);
+    cJSON_AddStringToObject(json, "availability_topic", "~/availability");
+    if (cJSON_GetObjectItem(json, "device") == nullptr) {
+        cJSON* device = cJSON_AddObjectToObject(json, "device");
+        cJSON* identifiers = cJSON_AddArrayToObject(device, "identifiers");
+        cJSON_AddItemToArray(identifiers, cJSON_CreateString(uniqueId_));
+    }
+    char topic[192];
+    if (object == nullptr) {
+        std::snprintf(topic, sizeof(topic), "%s", discoveryTopic_);
+    } else {
+        std::snprintf(topic, sizeof(topic), "%s/%s/%s/%s/config", config_.connectors.mqttDiscoveryPrefix,
+                      component, uniqueId_, object);
+    }
+    char* payload = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+    if (payload != nullptr) {
+        esp_mqtt_client_publish(client_, topic, payload, 0, 1, 1);
+        cJSON_free(payload);
+    }
+}
+
 void HomeAssistantMqttConnector::publishDiscovery()
 {
     const RuntimeSnapshot snapshot = runtime_.snapshot();
-    char modeStateTopic[128];
-    char temperatureStateTopic[128];
-    char currentTemperatureTopic[128];
-    char fanStateTopic[128];
-    std::snprintf(modeStateTopic, sizeof(modeStateTopic), "%s/mode/state", baseTopic_);
-    std::snprintf(temperatureStateTopic, sizeof(temperatureStateTopic), "%s/temperature/state",
-                  baseTopic_);
-    std::snprintf(currentTemperatureTopic, sizeof(currentTemperatureTopic), "%s/current/state",
-                  baseTopic_);
-    std::snprintf(fanStateTopic, sizeof(fanStateTopic), "%s/fan/state", baseTopic_);
+    char id[72];
+    uint8_t mac[6] = {};
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    char url[48];
+    std::snprintf(url, sizeof(url), "http://opencomfort-%02x%02x.local/", mac[4], mac[5]);
 
-    cJSON* json = cJSON_CreateObject();
-    cJSON_AddStringToObject(json, "name", config_.friendlyName);
-    cJSON_AddStringToObject(json, "unique_id", uniqueId_);
-    cJSON_AddStringToObject(json, "availability_topic", availabilityTopic_);
-    cJSON_AddStringToObject(json, "mode_command_topic", modeCommandTopic_);
-    cJSON_AddStringToObject(json, "mode_state_topic", modeStateTopic);
-    cJSON_AddStringToObject(json, "temperature_command_topic", temperatureCommandTopic_);
-    cJSON_AddStringToObject(json, "temperature_state_topic", temperatureStateTopic);
-    cJSON_AddStringToObject(json, "current_temperature_topic", currentTemperatureTopic);
-    cJSON_AddStringToObject(json, "fan_mode_command_topic", fanCommandTopic_);
-    cJSON_AddStringToObject(json, "fan_mode_state_topic", fanStateTopic);
-    cJSON_AddNumberToObject(json, "min_temp", snapshot.acCapabilities.minTempC);
-    cJSON_AddNumberToObject(json, "max_temp", snapshot.acCapabilities.maxTempC);
-    cJSON_AddNumberToObject(json, "temp_step", 0.5);
-    cJSON_AddStringToObject(json, "temperature_unit", "C");
-
-    cJSON* modes = cJSON_AddArrayToObject(json, "modes");
-    for (const char* mode : {"off", "cool", "heat", "dry", "fan_only", "auto"}) {
+    // Climate: power, mode, whole-degree setpoint, fan and the room temperature.
+    cJSON* climate = cJSON_CreateObject();
+    cJSON_AddNullToObject(climate, "name");  // the device name
+    cJSON_AddStringToObject(climate, "unique_id", uniqueId_);
+    cJSON_AddStringToObject(climate, "power_command_topic", "~/power/set");
+    cJSON_AddStringToObject(climate, "payload_on", "ON");
+    cJSON_AddStringToObject(climate, "payload_off", "OFF");
+    cJSON_AddStringToObject(climate, "mode_command_topic", "~/mode/set");
+    cJSON_AddStringToObject(climate, "mode_state_topic", "~/mode/state");
+    cJSON_AddStringToObject(climate, "temperature_command_topic", "~/temperature/set");
+    cJSON_AddStringToObject(climate, "temperature_state_topic", "~/temperature/state");
+    cJSON_AddStringToObject(climate, "current_temperature_topic", "~/current/state");
+    cJSON_AddStringToObject(climate, "fan_mode_command_topic", "~/fan/set");
+    cJSON_AddStringToObject(climate, "fan_mode_state_topic", "~/fan/state");
+    cJSON_AddNumberToObject(climate, "min_temp", snapshot.acCapabilities.minTempC);
+    cJSON_AddNumberToObject(climate, "max_temp", snapshot.acCapabilities.maxTempC);
+    cJSON_AddNumberToObject(climate, "temp_step", 1);
+    cJSON_AddNumberToObject(climate, "precision", 1.0);
+    cJSON_AddStringToObject(climate, "temperature_unit", "C");
+    cJSON* modes = cJSON_AddArrayToObject(climate, "modes");
+    for (const char* mode : {"off", "auto", "cool", "heat", "dry", "fan_only"}) {
         cJSON_AddItemToArray(modes, cJSON_CreateString(mode));
     }
-    cJSON* fanModes = cJSON_AddArrayToObject(json, "fan_modes");
+    cJSON* fanModes = cJSON_AddArrayToObject(climate, "fan_modes");
     for (const char* fan : {"auto", "low", "medium", "high"}) {
         cJSON_AddItemToArray(fanModes, cJSON_CreateString(fan));
     }
-    cJSON* device = cJSON_AddObjectToObject(json, "device");
+    // Vanes and the live action only when the profile supports them.
+    const AcRuntimeCapabilities& caps = snapshot.acCapabilities;
+    if (caps.vaneCount > 0) {
+        cJSON_AddStringToObject(climate, "swing_mode_command_topic", "~/swing/set");
+        cJSON_AddStringToObject(climate, "swing_mode_state_topic", "~/swing/state");
+        cJSON* swingModes = cJSON_AddArrayToObject(climate, "swing_modes");
+        for (size_t i = 0; i < caps.vaneCount; ++i) {
+            cJSON_AddItemToArray(swingModes, cJSON_CreateString(caps.vaneNames[i]));
+        }
+    }
+    if (caps.reportsAction) {
+        cJSON_AddStringToObject(climate, "action_topic", "~/action/state");
+    }
+    cJSON* device = cJSON_AddObjectToObject(climate, "device");
     cJSON* identifiers = cJSON_AddArrayToObject(device, "identifiers");
     cJSON_AddItemToArray(identifiers, cJSON_CreateString(uniqueId_));
     cJSON_AddStringToObject(device, "name", config_.friendlyName);
     cJSON_AddStringToObject(device, "manufacturer", "OpenComfort");
     cJSON_AddStringToObject(device, "model", config_.ac.modelId);
+    cJSON_AddStringToObject(device, "sw_version", esp_app_get_description()->version);
+    cJSON_AddStringToObject(device, "configuration_url", url);
+    publishEntity("climate", nullptr, climate);
 
-    char* payload = cJSON_PrintUnformatted(json);
-    cJSON_Delete(json);
-    if (payload != nullptr) {
-        esp_mqtt_client_publish(client_, discoveryTopic_, payload, 0, 1, 1);
-        cJSON_free(payload);
+    cJSON* room = cJSON_CreateObject();
+    cJSON_AddStringToObject(room, "name", "Room temperature");
+    std::snprintf(id, sizeof(id), "%s_room", uniqueId_);
+    cJSON_AddStringToObject(room, "unique_id", id);
+    cJSON_AddStringToObject(room, "state_topic", "~/current/state");
+    cJSON_AddStringToObject(room, "device_class", "temperature");
+    cJSON_AddStringToObject(room, "state_class", "measurement");
+    cJSON_AddStringToObject(room, "unit_of_measurement", "°C");
+    publishEntity("sensor", "room", room);
+
+    cJSON* sleep = cJSON_CreateObject();
+    cJSON_AddStringToObject(sleep, "name", "Sleep timer");
+    std::snprintf(id, sizeof(id), "%s_sleep", uniqueId_);
+    cJSON_AddStringToObject(sleep, "unique_id", id);
+    cJSON_AddStringToObject(sleep, "command_topic", "~/sleep/set");
+    cJSON_AddStringToObject(sleep, "state_topic", "~/sleep/state");
+    cJSON_AddStringToObject(sleep, "icon", "mdi:power-sleep");
+    cJSON* options = cJSON_AddArrayToObject(sleep, "options");
+    for (const SleepOption& option : kSleepOptions) {
+        cJSON_AddItemToArray(options, cJSON_CreateString(option.label));
+    }
+    publishEntity("select", "sleep", sleep);
+
+    cJSON* answering = cJSON_CreateObject();
+    cJSON_AddStringToObject(answering, "name", "Unit answering");
+    std::snprintf(id, sizeof(id), "%s_answering", uniqueId_);
+    cJSON_AddStringToObject(answering, "unique_id", id);
+    cJSON_AddStringToObject(answering, "state_topic", "~/answering/state");
+    cJSON_AddStringToObject(answering, "device_class", "connectivity");
+    cJSON_AddStringToObject(answering, "entity_category", "diagnostic");
+    publishEntity("binary_sensor", "answering", answering);
+
+    cJSON* rssi = cJSON_CreateObject();
+    cJSON_AddStringToObject(rssi, "name", "Wi-Fi signal");
+    std::snprintf(id, sizeof(id), "%s_rssi", uniqueId_);
+    cJSON_AddStringToObject(rssi, "unique_id", id);
+    cJSON_AddStringToObject(rssi, "state_topic", "~/rssi/state");
+    cJSON_AddStringToObject(rssi, "device_class", "signal_strength");
+    cJSON_AddStringToObject(rssi, "state_class", "measurement");
+    cJSON_AddStringToObject(rssi, "unit_of_measurement", "dBm");
+    cJSON_AddStringToObject(rssi, "entity_category", "diagnostic");
+    cJSON_AddBoolToObject(rssi, "enabled_by_default", false);
+    publishEntity("sensor", "rssi", rssi);
+
+    if (UpdateService::instance().status().enabled) {
+        cJSON* update = cJSON_CreateObject();
+        cJSON_AddStringToObject(update, "name", "Firmware");
+        std::snprintf(id, sizeof(id), "%s_firmware", uniqueId_);
+        cJSON_AddStringToObject(update, "unique_id", id);
+        cJSON_AddStringToObject(update, "device_class", "firmware");
+        cJSON_AddStringToObject(update, "state_topic", "~/update/state");
+        cJSON_AddStringToObject(update, "command_topic", "~/update/install");
+        cJSON_AddStringToObject(update, "payload_install", "install");
+        cJSON_AddStringToObject(update, "entity_category", "config");
+        publishEntity("update", "firmware", update);
     }
 }
 
@@ -348,16 +510,63 @@ void HomeAssistantMqttConnector::publishState(bool force)
                                                                              : AcMode::Off),
                             0, 1, 1);
     std::snprintf(topic, sizeof(topic), "%s/temperature/state", baseTopic_);
-    std::snprintf(number, sizeof(number), "%.1f", snapshot.desired.targetTempC);
+    std::snprintf(number, sizeof(number), "%.0f", snapshot.desired.targetTempC);
     esp_mqtt_client_publish(client_, topic, number, 0, 1, 1);
     std::snprintf(topic, sizeof(topic), "%s/fan/state", baseTopic_);
     esp_mqtt_client_publish(client_, topic, fanName(snapshot.desired.fan), 0, 1, 1);
-    if (snapshot.reported.valid) {
+    const AcRuntimeCapabilities& caps = snapshot.acCapabilities;
+    if (caps.vaneCount > 0 && snapshot.desired.vanes < caps.vaneCount) {
+        std::snprintf(topic, sizeof(topic), "%s/swing/state", baseTopic_);
+        esp_mqtt_client_publish(client_, topic, caps.vaneNames[snapshot.desired.vanes], 0, 1, 1);
+    }
+    const AcAction action = acAction(snapshot.desired, snapshot.reported);
+    if (action != AcAction::Unknown) {
+        // Home Assistant's names: off, idle, cooling, heating, drying, fan.
+        std::snprintf(topic, sizeof(topic), "%s/action/state", baseTopic_);
+        esp_mqtt_client_publish(client_, topic, toString(action), 0, 1, 1);
+    }
+    if (snapshot.reported.hasRoomTemp) {
         std::snprintf(topic, sizeof(topic), "%s/current/state", baseTopic_);
         std::snprintf(number, sizeof(number), "%.1f", snapshot.reported.returnAirC);
         esp_mqtt_client_publish(client_, topic, number, 0, 1, 1);
     }
     publishedRevision_ = snapshot.revision;
+}
+
+// Values that change without a runtime revision: sleep countdown, unit contact, signal, update.
+void HomeAssistantMqttConnector::publishExtras()
+{
+    char topic[128];
+    std::snprintf(topic, sizeof(topic), "%s/sleep/state", baseTopic_);
+    esp_mqtt_client_publish(client_, topic, sleepLabel(ScheduleService::instance().sleepSecondsLeft()), 0, 1, 1);
+
+    std::snprintf(topic, sizeof(topic), "%s/answering/state", baseTopic_);
+    esp_mqtt_client_publish(client_, topic, runtime_.snapshot().reported.valid ? "ON" : "OFF", 0, 1, 1);
+
+    wifi_ap_record_t ap{};
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        char number[8];
+        std::snprintf(number, sizeof(number), "%d", ap.rssi);
+        std::snprintf(topic, sizeof(topic), "%s/rssi/state", baseTopic_);
+        esp_mqtt_client_publish(client_, topic, number, 0, 0, 0);
+    }
+
+    const UpdateStatus update = UpdateService::instance().status();
+    if (update.enabled) {
+        const bool newer = update.state == UpdateState::Available || update.state == UpdateState::Downloading;
+        char payload[192];
+        if (update.state == UpdateState::Downloading) {
+            std::snprintf(payload, sizeof(payload),
+                          "{\"installed_version\":\"%s\",\"latest_version\":\"%s\",\"in_progress\":true,\"update_percentage\":%u}",
+                          update.current, update.latest, static_cast<unsigned>(update.progress));
+        } else {
+            std::snprintf(payload, sizeof(payload),
+                          "{\"installed_version\":\"%s\",\"latest_version\":\"%s\",\"in_progress\":false}",
+                          update.current, newer ? update.latest : update.current);
+        }
+        std::snprintf(topic, sizeof(topic), "%s/update/state", baseTopic_);
+        esp_mqtt_client_publish(client_, topic, payload, 0, 1, 1);
+    }
 }
 
 void HomeAssistantMqttConnector::buildIdentity(const UserConfig& config)
@@ -368,12 +577,9 @@ void HomeAssistantMqttConnector::buildIdentity(const UserConfig& config)
                   mac[1], mac[2], mac[3], mac[4], mac[5]);
     std::snprintf(baseTopic_, sizeof(baseTopic_), "opencomfort/%s", uniqueId_);
     std::snprintf(availabilityTopic_, sizeof(availabilityTopic_), "%s/availability", baseTopic_);
-    std::snprintf(modeCommandTopic_, sizeof(modeCommandTopic_), "%s/mode/set", baseTopic_);
-    std::snprintf(temperatureCommandTopic_, sizeof(temperatureCommandTopic_),
-                  "%s/temperature/set", baseTopic_);
-    std::snprintf(fanCommandTopic_, sizeof(fanCommandTopic_), "%s/fan/set", baseTopic_);
     std::snprintf(discoveryTopic_, sizeof(discoveryTopic_), "%s/climate/%s/config",
                   config.connectors.mqttDiscoveryPrefix, uniqueId_);
+    std::snprintf(haStatusTopic_, sizeof(haStatusTopic_), "%s/status", config.connectors.mqttDiscoveryPrefix);
 }
 
 }  // namespace opencomfort

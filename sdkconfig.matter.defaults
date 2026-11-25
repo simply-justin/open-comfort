@@ -1,5 +1,5 @@
-# Apply after sdkconfig.defaults for the 16 MB Matter product profile.
-CONFIG_OPENCOMFORT_PROFILE_MATTER_16MB=y
+# Matter build. Apply after sdkconfig.defaults; 16 MB layout (add sdkconfig.8mb.defaults for 8 MB).
+CONFIG_OPENCOMFORT_PROFILE_MATTER=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-matter-16mb.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
@@ -20,3 +20,6 @@ CONFIG_SUPPORT_THERMOSTAT_CLUSTER=y
 CONFIG_SUPPORT_CLOSURE_CONTROL_CLUSTER=n
 CONFIG_SUPPORT_CLOSURE_DIMENSION_CLUSTER=n
 CONFIG_ENABLE_CHIP_SHELL=n
+# Share the ESP-IDF mDNS stack with the portal's opencomfort-xxxx.local name;
+# minimal mDNS would compete for UDP port 5353.
+CONFIG_USE_MINIMAL_MDNS=n

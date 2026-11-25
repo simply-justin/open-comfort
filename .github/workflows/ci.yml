@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build firmware
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          . "$IDF_PATH/export.sh"
+          idf.py build
+
+      - name: Unit tests (QEMU)
+        shell: bash
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends libslirp0
+          python3 "$IDF_PATH/tools/idf_tools.py" install qemu-xtensa
+          . "$IDF_PATH/export.sh"
+          ./scripts/run-unit-tests.sh

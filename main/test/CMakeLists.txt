@@ -1,11 +1,15 @@
 idf_component_register(
     SRCS
+        test_main.cpp
         test_runtime.cpp
         test_connector_manager.cpp
         test_ac_protocol_engine.cpp
+        test_web_and_state.cpp
+        test_schedule.cpp
     INCLUDE_DIRS
         ".."
     REQUIRES
         unity
         main
+    WHOLE_ARCHIVE
 )

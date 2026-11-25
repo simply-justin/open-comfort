@@ -1,18 +1,19 @@
 {
   "schemaVersion": 1,
   "profileId": "mitsubishi_heavy_industries",
-  "profileVersion": "1.0.0",
+  "profileVersion": "1.1.0",
   "brand": "Mitsubishi Heavy Industries",
   "models": [
+    "SRK25ZS-W",
     "SRK25ZSX",
     "SRK35ZSX",
     "Generic"
   ],
   "protocol": {
     "bus": "spi",
-    "bit_order": "MSB_FIRST",
-    "mode": "mode0",
-    "frequencyHz": 1000000
+    "role": "peripheral",
+    "bit_order": "LSB_FIRST",
+    "mode": "mode3"
   },
   "frameSize": 20,
   "capabilities": {

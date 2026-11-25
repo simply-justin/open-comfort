@@ -14,7 +14,7 @@ Report security problems privately, as described in [SECURITY.md](SECURITY.md#re
 
 1. Fork the repository and branch from `main`, for example `feat/uart-profile` or `fix/mqtt-reconnect`.
 2. Set up ESP-IDF v5.5.1 as described in [Getting Started](docs/getting-started.md).
-3. Make your change and check that `idf.py build` passes without new warnings.
+3. Make your change and check that `idf.py build` passes without new warnings and `./scripts/run-unit-tests.sh` passes.
 4. Test on an ESP32-S3 when the change touches a bus, a module, a connector or a profile. State in the pull request what you tested and on which hardware. Do not claim hardware behaviour you have not tested.
 5. Update the documentation in the same pull request when behaviour, configuration or an API changes.
 6. Open a pull request that explains what changed and why.

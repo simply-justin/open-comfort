@@ -1,4 +1,5 @@
 #include "src/Config/UserConfigStore.hpp"
+#include "src/Config/DeviceHostname.hpp"
 
 #include <cstring>
 
@@ -20,6 +21,17 @@ UserConfig migrateUserConfigV1(const UserConfigV1& source)
     copyBounded(out.ac.profileVersion, sizeof(out.ac.profileVersion), source.ac.profileVersion);
     copyBounded(out.ac.modelId, sizeof(out.ac.modelId), source.ac.modelId);
     out.ac.bus = source.ac.bus;
+    return out;
+}
+
+UserConfig migrateUserConfigV2(const UserConfigV2& source)
+{
+    UserConfig out;
+    out.provisioned = source.provisioned;
+    copyBounded(out.friendlyName, sizeof(out.friendlyName), source.friendlyName);
+    out.module = source.module;
+    out.ac = source.ac;
+    out.connectors = source.connectors;
     return out;
 }
 
@@ -67,6 +79,15 @@ ConfigStatus readSlot(nvs_handle_t handle, const char* key, UserConfig& out, boo
         return ConfigStatus::Ok;
     }
 
+    if (size == sizeof(UserConfigV2)) {
+        UserConfigV2 legacy{};
+        err = nvs_get_blob(handle, key, &legacy, &size);
+        if (err != ESP_OK || legacy.schemaVersion != 2) return ConfigStatus::Corrupt;
+        out = migrateUserConfigV2(legacy);
+        migrated = true;
+        return ConfigStatus::Ok;
+    }
+
     if (size == sizeof(UserConfig)) {
         UserConfig current{};
         err = nvs_get_blob(handle, key, &current, &size);
@@ -109,12 +130,16 @@ ConfigStatus UserConfigStore::validate(const UserConfig& config, const ProductDe
     if (config.friendlyName[0] == '\0') {
         return ConfigStatus::Invalid;
     }
+    if (!isValidDeviceHostname(config.hostname)) return ConfigStatus::Invalid;
     if (!config.connectors.localWebEnabled) {
         return ConfigStatus::Invalid;
     }
     if (config.connectors.mqttEnabled &&
         (config.connectors.mqttHost[0] == '\0' || config.connectors.mqttPort == 0 ||
          config.connectors.mqttDiscoveryPrefix[0] == '\0')) {
+        return ConfigStatus::Invalid;
+    }
+    if (config.connectors.mqttEnabled && !product.supportsMqtt) {
         return ConfigStatus::Invalid;
     }
     if (config.connectors.matterEnabled && !product.supportsMatter) {
@@ -242,6 +267,49 @@ ConfigStatus UserConfigStore::save(const UserConfig& config)
     nvs_close(handle);
     ESP_LOGI(kTag, "Saved user config to slot %u", static_cast<unsigned>(next));
     return ConfigStatus::Ok;
+}
+
+namespace {
+constexpr const char* kAcDesiredKey = "ac_desired";
+constexpr uint8_t kAcDesiredVersion = 2;  // 2: vane position
+
+struct StoredAcDesired {
+    uint8_t version = kAcDesiredVersion;
+    AcDesiredState state{};
+};
+}  // namespace
+
+bool UserConfigStore::loadAcDesired(AcDesiredState& out)
+{
+    nvs_handle_t handle = 0;
+    if (nvs_open(kNamespace, NVS_READONLY, &handle) != ESP_OK) {
+        return false;
+    }
+    StoredAcDesired stored;
+    size_t size = sizeof(stored);
+    const esp_err_t err = nvs_get_blob(handle, kAcDesiredKey, &stored, &size);
+    nvs_close(handle);
+    if (err != ESP_OK || size != sizeof(stored) || stored.version != kAcDesiredVersion) {
+        return false;
+    }
+    out = stored.state;
+    return true;
+}
+
+ConfigStatus UserConfigStore::saveAcDesired(const AcDesiredState& state)
+{
+    nvs_handle_t handle = 0;
+    if (nvs_open(kNamespace, NVS_READWRITE, &handle) != ESP_OK) {
+        return ConfigStatus::IoError;
+    }
+    StoredAcDesired stored;
+    stored.state = state;
+    esp_err_t err = nvs_set_blob(handle, kAcDesiredKey, &stored, sizeof(stored));
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return err == ESP_OK ? ConfigStatus::Ok : ConfigStatus::IoError;
 }
 
 ConfigStatus UserConfigStore::clear()

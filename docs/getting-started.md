@@ -7,7 +7,7 @@ This guide takes you from a fresh clone to a provisioned OpenComfort device that
 | Requirement | Notes |
 |---|---|
 | ESP-IDF v5.5.1 | Installed by the devcontainer or `scripts/bootstrap-dev.sh` |
-| ESP32-S3 board | 4 MB flash for the default build, 16 MB for the Matter build |
+| ESP32-S3 board | 4 MB flash for the Home Assistant build, 8 or 16 MB for Matter and Full builds |
 | USB data cable | For flashing and the serial monitor |
 | 2.4 GHz Wi-Fi network | Needed during setup |
 | OpenComfort hardware or wiring | The bus pins are fixed by the board definition (see [Architecture](architecture.md#board-definition)) |
@@ -36,9 +36,9 @@ idf.py set-target esp32s3
 idf.py build
 ```
 
-This builds the default **legacy 4 MB** profile (local web portal and Home Assistant MQTT). `sdkconfig.defaults` already selects the custom partition table, the flash size and the HTTPS certificate bundle, so no `menuconfig` changes are needed.
+This builds the default **Home Assistant 4 MB** profile (local web portal and Home Assistant MQTT). `sdkconfig.defaults` already selects the custom partition table, the flash size and the HTTPS certificate bundle, so no `menuconfig` changes are needed.
 
-For the **Matter 16 MB** profile, see [Runtime API › Product profiles](runtime-api.md#product-profiles).
+For **Matter** or **Full** builds on 8 or 16 MB boards, see [Runtime API › Product profiles](runtime-api.md#product-profiles). If you are reusing a build directory from before the profile rename, follow the [configuration migration steps](runtime-api.md#reusing-a-build-directory-after-the-profile-rename) first.
 
 ## 3. Flash
 
@@ -70,9 +70,35 @@ http://opencomfort-xxxx.local
 
 On networks without mDNS, use the IP address from your router's client list or the serial log. Sign in with the administrator password to control the unit and change settings. See [Runtime API](runtime-api.md) for everything the portal and API can do.
 
+## Updating the firmware
+
+**Online:** in the portal, **Settings → Firmware** checks the GitHub releases of `CONFIG_OPENCOMFORT_UPDATE_REPO` (default `simply-justin/open-comfort`) and offers the newest version built for this device (`ha-4mb`, `matter-8mb`, `matter-16mb`, `full-8mb` or `full-16mb`). Choose **Releases** (default) or **Pre-releases**; turn on **Install automatically** to install new versions after the daily check. Development builds are offered the newest release but never update themselves automatically.
+
+**From a file:** under **Install from a file**, upload a `.bin` you built yourself, for example `build-device/OpenComfort.bin`.
+
+Either way the new image goes to the inactive OTA slot. If it does not start properly, the device returns to the previous version after the next reset. Devices flashed before OTA support used a single-app partition table. Flash those once more over USB (`idf.py -p PORT flash`); the configuration in NVS is kept.
+
+### Publishing a release
+
+Push a tag: `git tag v0.2.0 && git push origin v0.2.0`. The release workflow builds all five variants, checks that the firmware version equals the tag and attaches `opencomfort-<variant>.bin` to a GitHub release. Tags with a suffix, such as `v0.3.0-beta.1` or `v0.3.0-rc.1`, become pre-releases.
+
+## Running the unit tests
+
+The Unity tests in `main/test/` run in the ESP32-S3 emulator:
+
+```sh
+python3 "$IDF_PATH/tools/idf_tools.py" install qemu-xtensa   # once
+sudo apt-get install libslirp0                                # once, Debian/Ubuntu
+./scripts/run-unit-tests.sh
+```
+
+CI runs the same script on every push and pull request.
+
 ## Factory reset
 
-Hold the factory-reset button (GPIO0, the BOOT button on rev-A boards) for 5 seconds, at power-on or while running. This clears the user configuration, Wi-Fi credentials, connector secrets and Matter fabrics, then restarts into the captive portal. The hold time is `CONFIG_OPENCOMFORT_FACTORY_RESET_HOLD_MS`.
+**Without a button:** switch the power off and on 5 times in a row, each time within 10 seconds. On the fifth power-on the device erases its configuration and starts setup again. Only real power-ons count: a crash or a watchdog reset breaks the sequence, and staying on for more than 10 seconds clears the count. Change or disable this with `CONFIG_OPENCOMFORT_POWER_CYCLE_RESET_COUNT` and `CONFIG_OPENCOMFORT_POWER_CYCLE_WINDOW_MS` (0 turns it off).
+
+**With the button:** Hold the factory-reset button (GPIO0, the BOOT button on rev-A boards) for 5 seconds, at power-on or while running. This clears the user configuration, Wi-Fi credentials, connector secrets and Matter fabrics, then restarts into the captive portal. The hold time is `CONFIG_OPENCOMFORT_FACTORY_RESET_HOLD_MS`.
 
 ## Troubleshooting
 

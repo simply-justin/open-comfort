@@ -36,6 +36,8 @@ struct BoardDefinition {
     const char* revision;
     BoardUartPins uart;
     BoardSpiPins spi;
+    BoardSpiPins mhi;
+    bool mhiExtendedFrames;
     BoardCanPins can;
     gpio_num_t factoryResetPin;
     int maxSpiClockHz;
@@ -51,6 +53,7 @@ struct ProductDefinition {
     const char* portalApPassword;
     const char* profileCatalogUrl;
     bool supportsMatter;
+    bool supportsMqtt;
 };
 
 const ProductDefinition& currentProduct();

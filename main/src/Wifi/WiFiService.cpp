@@ -24,6 +24,23 @@ EventGroupHandle_t s_events = nullptr;
 WifiStaState s_staState = WifiStaState::Idle;
 esp_netif_t* s_apNetif = nullptr;
 esp_netif_t* s_staNetif = nullptr;
+// Set once the device runs from stored credentials; then a lost connection is retried forever.
+bool s_autoReconnect = false;
+
+// The STA_START handler may already have started connecting (timing depends on what else
+// runs, e.g. Matter and BLE), so "already connecting" is success, not an error.
+esp_err_t connectOnce()
+{
+    const esp_err_t err = esp_wifi_connect();
+    return err == ESP_ERR_WIFI_CONN ? ESP_OK : err;
+}
+
+// Open networks need an open threshold; otherwise refuse anything weaker than WPA2, so a
+// look-alike open access point with the same name is never joined.
+wifi_auth_mode_t authThreshold(const char* password)
+{
+    return (password == nullptr || password[0] == '\0') ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+}
 
 void onWifiEvent(void* /*arg*/, esp_event_base_t eventBase, int32_t eventId, void* eventData)
 {
@@ -34,6 +51,11 @@ void onWifiEvent(void* /*arg*/, esp_event_base_t eventBase, int32_t eventId, voi
 
     if (eventBase == WIFI_EVENT && eventId == WIFI_EVENT_STA_DISCONNECTED) {
         s_staState = WifiStaState::Failed;
+        if (s_autoReconnect) {
+            // The driver's own scan/auth timeouts pace these retries (a few seconds each).
+            s_staState = WifiStaState::Connecting;
+            esp_wifi_connect();
+        }
         if (s_events != nullptr) {
             xEventGroupSetBits(s_events, kFailBit);
         }
@@ -100,6 +122,12 @@ esp_err_t WiFiService::init()
     return ESP_OK;
 }
 
+esp_err_t WiFiService::setStationHostname(const char* hostname)
+{
+    if (!s_initialized || s_staNetif == nullptr) return ESP_ERR_INVALID_STATE;
+    return esp_netif_set_hostname(s_staNetif, hostname);
+}
+
 esp_err_t WiFiService::startSoftAp(const char* ssid, const char* password)
 {
     if (!s_initialized) {
@@ -150,22 +178,24 @@ esp_err_t WiFiService::connectStation(const WifiCredentials& credentials, uint32
     std::strncpy(reinterpret_cast<char*>(sta.sta.ssid), credentials.ssid, sizeof(sta.sta.ssid) - 1);
     std::strncpy(reinterpret_cast<char*>(sta.sta.password), credentials.password,
                  sizeof(sta.sta.password) - 1);
-    sta.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    sta.sta.threshold.authmode = authThreshold(credentials.password);
 
     xEventGroupClearBits(s_events, kConnectedBit | kFailBit);
     s_staState = WifiStaState::Connecting;
 
     wifi_mode_t mode = WIFI_MODE_STA;
     esp_wifi_get_mode(&mode);
-    if (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA) {
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    } else {
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    // Called from the setup page, possibly twice: report failures instead of aborting.
+    esp_err_t err = esp_wifi_set_mode((mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA)
+                                          ? WIFI_MODE_APSTA
+                                          : WIFI_MODE_STA);
+    if (err == ESP_OK) err = esp_wifi_set_config(WIFI_IF_STA, &sta);
+    if (err == ESP_OK) err = esp_wifi_start();
+    if (err == ESP_OK) err = connectOnce();
+    if (err != ESP_OK) {
+        s_staState = WifiStaState::Failed;
+        return err;
     }
-
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_ERROR_CHECK(esp_wifi_connect());
 
     const EventBits_t bits =
         xEventGroupWaitBits(s_events, kConnectedBit | kFailBit, pdTRUE, pdFALSE,
@@ -188,10 +218,15 @@ esp_err_t WiFiService::startStationFromStorage(uint32_t timeoutMs)
 
     xEventGroupClearBits(s_events, kConnectedBit | kFailBit);
     s_staState = WifiStaState::Connecting;
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_ERROR_CHECK(esp_wifi_connect());
+    s_autoReconnect = true;
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (err == ESP_OK) err = esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+    if (err == ESP_OK) err = esp_wifi_start();
+    if (err == ESP_OK) err = connectOnce();
+    if (err != ESP_OK) {
+        s_staState = WifiStaState::Failed;
+        return err;
+    }
 
     const EventBits_t bits =
         xEventGroupWaitBits(s_events, kConnectedBit | kFailBit, pdTRUE, pdFALSE,
@@ -208,6 +243,7 @@ esp_err_t WiFiService::disconnectStation()
     if (!s_initialized) {
         return ESP_ERR_INVALID_STATE;
     }
+    s_autoReconnect = false;
     s_staState = WifiStaState::Idle;
     return esp_wifi_disconnect();
 }
@@ -221,18 +257,23 @@ esp_err_t WiFiService::scan(WifiScanEntry* out, size_t capacity, size_t& count, 
 
     wifi_mode_t mode = WIFI_MODE_NULL;
     esp_wifi_get_mode(&mode);
+    esp_err_t err = ESP_OK;
     if (mode == WIFI_MODE_NULL) {
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-        ESP_ERROR_CHECK(esp_wifi_start());
+        err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+        if (err == ESP_OK) err = esp_wifi_start();
+        if (err != ESP_OK) return err;
     }
 
     wifi_scan_config_t scanCfg = {};
     scanCfg.show_hidden = false;
     scanCfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
-    ESP_ERROR_CHECK(esp_wifi_scan_start(&scanCfg, true));
+    // A scan can fail while the station is connecting; report it instead of aborting.
+    err = esp_wifi_scan_start(&scanCfg, true);
+    if (err != ESP_OK) return err;
 
     uint16_t apCount = 0;
-    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&apCount));
+    err = esp_wifi_scan_get_ap_num(&apCount);
+    if (err != ESP_OK) return err;
     if (apCount == 0) {
         return ESP_OK;
     }
@@ -242,7 +283,11 @@ esp_err_t WiFiService::scan(WifiScanEntry* out, size_t capacity, size_t& count, 
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&apCount, records));
+    err = esp_wifi_scan_get_ap_records(&apCount, records);
+    if (err != ESP_OK) {
+        free(records);
+        return err;
+    }
     const size_t limit = (apCount < capacity) ? apCount : capacity;
     for (size_t i = 0; i < limit; ++i) {
         std::strncpy(out[i].ssid, reinterpret_cast<const char*>(records[i].ssid),
@@ -273,7 +318,11 @@ esp_err_t WiFiService::saveCredentials(const WifiCredentials& credentials)
     std::strncpy(reinterpret_cast<char*>(sta.sta.ssid), credentials.ssid, sizeof(sta.sta.ssid) - 1);
     std::strncpy(reinterpret_cast<char*>(sta.sta.password), credentials.password,
                  sizeof(sta.sta.password) - 1);
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
+    sta.sta.threshold.authmode = authThreshold(credentials.password);
+    const esp_err_t err = esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+    if (err != ESP_OK) {
+        return err;
+    }
     return esp_wifi_set_config(WIFI_IF_STA, &sta);
 }
 

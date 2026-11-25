@@ -18,7 +18,9 @@ OpenComfort is modular ESP-IDF firmware for smart-home products. A product defin
 - **One runtime, several control surfaces.** The local portal, Home Assistant MQTT discovery and Matter all go through one serialized runtime.
 - **Hardened transports** for UART, SPI and CAN with pins fixed by the board definition.
 - **Durable configuration** in NVS with dual-slot commits and schema migration.
-- **Factory reset** by holding the BOOT button.
+- **Schedules and a sleep timer** that run on the device, plus a 24-hour room temperature history.
+- **Firmware updates** from GitHub releases (release or pre-release channel, optional automatic install) or from a file, with automatic rollback if a new image fails to start.
+- **Factory reset** by switching the power off and on 5 times, or by holding the BOOT button.
 - **Production security prep** for Secure Boot, flash encryption and NVS encryption.
 
 ## Quick start
@@ -70,10 +72,12 @@ main/
 │   ├── Modules/          Modules and the AC protocol engine
 │   ├── Runtime/          Serialized state and command API
 │   └── Connectors/       Web, Home Assistant MQTT, Matter
-├── spiffs/               Portal UI and bundled profiles
+├── www/                  Portal UI (embedded in the app)
+├── spiffs/               Bundled AC profiles
 └── test/                 Unity tests
 matter_components/        Isolated ESP-Matter component
-scripts/                  Toolchain bootstrap and profile signing
+test_app/                 Unity test app (runs in QEMU)
+scripts/                  Toolchain bootstrap, unit tests, profile signing
 ```
 
 ## Contributing

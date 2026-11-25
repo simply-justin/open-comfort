@@ -6,7 +6,8 @@ Commercial use requires a commercial license.
 
 #include "src/Application/Application.hpp"
 
-extern "C" void app_main(void)
+// Weak so the Unity test app (test_app/) can provide its own entry point.
+extern "C" __attribute__((weak)) void app_main(void)
 {
     opencomfort::Application::run();
 }

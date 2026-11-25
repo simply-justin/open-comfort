@@ -38,6 +38,7 @@ struct WifiScanEntry {
 class WiFiService {
 public:
     static esp_err_t init();
+    static esp_err_t setStationHostname(const char* hostname);
     static esp_err_t startSoftAp(const char* ssid, const char* password);
     static esp_err_t stopSoftAp();
     static esp_err_t connectStation(const WifiCredentials& credentials, uint32_t timeoutMs);

@@ -4,7 +4,7 @@ A **profile** is a JSON file that tells OpenComfort how to talk to an air-condit
 
 ## Bundled and remote catalogs
 
-The bundled catalog is `main/spiffs/profiles/index.json`. It ships in the firmware image and is trusted as part of it.
+The bundled catalog is `main/spiffs/profiles/index.json`. It ships in the SPIFFS image and is trusted as part of the firmware. Portal (OTA) updates replace only the app, so changes to bundled profiles reach a device through a USB flash or the remote catalog.
 
 When `CONFIG_OPENCOMFORT_PROFILE_CATALOG_URL` is set, the device also downloads a remote catalog over HTTPS after it joins Wi-Fi. Remote entries are merged with the bundled ones. A remote profile is only used after its SHA-256 and ECDSA signature check out.
 
@@ -110,3 +110,20 @@ The script prints `sha256` and `signature`. The signed message is `<id>|<sha256>
 3. **Bundle it.** Add the file under `main/spiffs/profiles/` and an entry with its `sha256` to `index.json`.
 4. **Test on hardware.** Run setup, select the model and compare the frames on a logic analyser with the original remote.
 5. **Contribute.** Open a pull request with the models you tested, the connector and any limitations.
+
+The bundled Mitsubishi Heavy Industries profile uses the dedicated 20-byte CNS
+codec. The indoor unit supplies SCK and MOSI. On rev-A these are inputs GPIO12
+and GPIO11, and GPIO13 supplies MISO. No external CS is used. The peripheral
+uses mode 3, least-significant bit first, and synchronizes on gaps in SCK.
+A valid signature and checksum are required before sending settings. A completed
+SPI transfer reports transmission, while actual operation requires testing on
+the connected indoor unit. The default rev-A configuration uses 20-byte frames.
+
+The XIAO ESP32-S3 attic controller uses 33-byte frames with a second checksum.
+Build with `-D OPENCOMFORT_MHI_BOARD=xiao-s3-attic` for SCK GPIO7, MOSI GPIO9
+and MISO GPIO8. CMake remembers the board in that build directory. Use
+`-D OPENCOMFORT_MHI_BOARD=rev-a` to restore the rev-A settings. The Status page
+reports clock bursts seen since boot when the AC does not answer.
+The Full 8 MB attic build looks for `opencomfort-full-8mb-xiao-attic.bin` during
+online updates. Until a matching release asset is published, install a locally
+built attic image through USB or the portal.

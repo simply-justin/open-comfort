@@ -15,7 +15,8 @@ constexpr size_t kMaxModelIdLen = 48;
 constexpr size_t kMaxProfileVersionLen = 16;
 constexpr size_t kMaxMqttHostLen = 127;
 constexpr size_t kMaxMqttDiscoveryPrefixLen = 32;
-constexpr uint16_t kUserConfigSchemaVersion = 2;
+constexpr size_t kMaxHostnameLen = 32;
+constexpr uint16_t kUserConfigSchemaVersion = 3;
 
 struct AcUserConfig {
     char profileId[kMaxProfileIdLen + 1] = {};
@@ -37,10 +38,21 @@ struct ConnectorConfig {
     bool localWebEnabled = true;
     bool mqttEnabled = false;
     bool matterEnabled = false;
-    bool mqttTls = true;
-    uint16_t mqttPort = 8883;
+    // Defaults match Home Assistant's Mosquitto add-on (plain MQTT on the LAN).
+    bool mqttTls = false;
+    uint16_t mqttPort = 1883;
     char mqttHost[kMaxMqttHostLen + 1] = {};
     char mqttDiscoveryPrefix[kMaxMqttDiscoveryPrefixLen + 1] = "homeassistant";
+};
+
+// Frozen schema used only to migrate devices shipped with schema v2.
+struct UserConfigV2 {
+    uint16_t schemaVersion = 2;
+    bool provisioned = false;
+    char friendlyName[kMaxFriendlyNameLen + 1] = "OpenComfort";
+    ModuleKind module = ModuleKind::Ac;
+    AcUserConfig ac = {};
+    ConnectorConfig connectors = {};
 };
 
 struct UserConfig {
@@ -50,9 +62,11 @@ struct UserConfig {
     ModuleKind module = ModuleKind::Ac;
     AcUserConfig ac = {};
     ConnectorConfig connectors = {};
+    // DNS label without .local; empty keeps the MAC-derived default.
+    char hostname[kMaxHostnameLen + 1] = {};
 };
 
-static_assert(sizeof(UserConfig) > sizeof(UserConfigV1), "v2 config must extend v1");
+static_assert(sizeof(UserConfig) > sizeof(UserConfigV2), "v3 config must extend v2");
 
 inline void copyBounded(char* dest, size_t destSize, const char* src)
 {

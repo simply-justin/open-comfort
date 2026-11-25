@@ -1,8 +1,12 @@
 #include "src/Modules/Ac/Ac.hpp"
 
 #include <cmath>
+#include <cstring>
+#include <cstring>
+#include "src/Modules/Ac/MhiLink.hpp"
 #include <string>
 
+#include "src/Config/UserConfigStore.hpp"
 #include "src/Profiles/ProfileRepository.hpp"
 
 extern "C" {
@@ -44,44 +48,63 @@ void AcModule::bootstrap()
         return;
     }
 
-    ProtocolBusParams protocol;
-    protocol.kind = profile_.bus;
-    protocol.baudOrClockHz = profile_.baudOrClockHz;
-    protocol.spiMode = profile_.spiMode;
+    mhiLink_ = profile_.bus == BusKind::Spi &&
+               std::strcmp(profile_.profileId, "mitsubishi_heavy_industries") == 0;
+    if (mhiLink_) {
+        const esp_err_t err = mhi::start(product_.board->mhi, product_.board->mhiExtendedFrames);
+        if (err != ESP_OK) {
+            ESP_LOGE(kTag, "MHI SPI peripheral initialization failed: %s", esp_err_to_name(err));
+            return;
+        }
+        bus_.kind = BusKind::Spi;
+    } else {
+        ProtocolBusParams protocol;
+        protocol.kind = profile_.bus;
+        protocol.baudOrClockHz = profile_.baudOrClockHz;
+        protocol.spiMode = profile_.spiMode;
 
-    BusConfigVariant busCfg;
-    const BusStatus mergeStatus = BusFactory::merge(product_, protocol, busCfg);
-    if (mergeStatus != BusStatus::Ok) {
-        ESP_LOGE(kTag, "Bus merge failed: %s", toString(mergeStatus));
-        return;
+        BusConfigVariant busCfg;
+        const BusStatus mergeStatus = BusFactory::merge(product_, protocol, busCfg);
+        if (mergeStatus != BusStatus::Ok) {
+            ESP_LOGE(kTag, "Bus merge failed: %s", toString(mergeStatus));
+            return;
+        }
+
+        const BusStatus validateStatus = BusFactory::validateConfig(busCfg);
+        if (validateStatus != BusStatus::Ok) {
+            ESP_LOGE(kTag, "Bus validation failed: %s", toString(validateStatus));
+            return;
+        }
+
+        const BusResult opened = BusFactory::createOpen(busCfg, bus_);
+        if (!opened) {
+            ESP_LOGE(kTag, "Bus open failed: %s", toString(opened.status));
+            return;
+        }
     }
 
-    const BusStatus validateStatus = BusFactory::validateConfig(busCfg);
-    if (validateStatus != BusStatus::Ok) {
-        ESP_LOGE(kTag, "Bus validation failed: %s", toString(validateStatus));
-        return;
-    }
-
-    const BusResult opened = BusFactory::createOpen(busCfg, bus_);
-    if (!opened) {
-        ESP_LOGE(kTag, "Bus open failed: %s", toString(opened.status));
-        return;
-    }
-
-    // Push initial desired defaults once so the bus path is exercised safely.
+    // Restore the last applied state without transmitting it: a restart (settings change,
+    // update, power blip) must not switch the unit off or change what it is doing.
     desired_ = AcDesiredState{};
-    desired_.powerOn = false;
-    desired_.mode = AcMode::Cool;
-    desired_.targetTempC = 22.0f;
-    desired_.fan = AcFanSpeed::Auto;
-    if (protocol_.applyDesiredState(bus_, desired_) != ESP_OK) {
-        ESP_LOGW(kTag, "Initial desired-state transmit failed (bus may be disconnected)");
+    if (UserConfigStore::loadAcDesired(desired_) && !isValidDesired(desired_)) {
+        desired_ = AcDesiredState{};
     }
 
     config_.ac.bus = bus_.kind;
     nextPoll_ = xTaskGetTickCount();
     booted_ = true;
     ESP_LOGI(kTag, "AC module booted on bus=%s", toString(bus_.kind));
+}
+
+bool AcModule::isValidDesired(const AcDesiredState& desired) const
+{
+    const AcProtocolProfile& capabilities = protocol_.profile();
+    return std::isfinite(desired.targetTempC) &&
+           desired.targetTempC >= static_cast<float>(capabilities.minTempC) &&
+           desired.targetTempC <= static_cast<float>(capabilities.maxTempC) &&
+           static_cast<uint8_t>(desired.mode) <= static_cast<uint8_t>(AcMode::Auto) &&
+           static_cast<uint8_t>(desired.fan) <= static_cast<uint8_t>(AcFanSpeed::High) &&
+           (capabilities.vaneCount == 0 ? desired.vanes == 0 : desired.vanes < capabilities.vaneCount);
 }
 
 bool AcModule::isBooted() const
@@ -94,18 +117,20 @@ esp_err_t AcModule::applyRuntimeDesired(const AcDesiredState& desired)
     if (!booted_ || !protocol_.isLoaded()) {
         return ESP_ERR_INVALID_STATE;
     }
-    const AcProtocolProfile& capabilities = protocol_.profile();
-    if (!std::isfinite(desired.targetTempC) ||
-        desired.targetTempC < static_cast<float>(capabilities.minTempC) ||
-        desired.targetTempC > static_cast<float>(capabilities.maxTempC) ||
-        static_cast<uint8_t>(desired.mode) > static_cast<uint8_t>(AcMode::Auto) ||
-        static_cast<uint8_t>(desired.fan) > static_cast<uint8_t>(AcFanSpeed::High)) {
+    if (!isValidDesired(desired)) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    const esp_err_t err = protocol_.applyDesiredState(bus_, desired);
+    const esp_err_t err = mhiLink_ ? mhi::exchange(&desired, reported_)
+                                   : protocol_.applyDesiredState(bus_, desired);
     if (err == ESP_OK) {
+        const bool changed = desired.powerOn != desired_.powerOn || desired.mode != desired_.mode ||
+                             desired.targetTempC != desired_.targetTempC || desired.fan != desired_.fan ||
+                             desired.vanes != desired_.vanes;
         desired_ = desired;
+        if (changed && UserConfigStore::saveAcDesired(desired_) != ConfigStatus::Ok) {
+            ESP_LOGW(kTag, "Could not persist AC state");
+        }
     }
     return err;
 }
@@ -118,8 +143,16 @@ RuntimeSnapshot AcModule::runtimeSnapshot() const
     snapshot.desired = desired_;
     snapshot.reported = reported_;
     if (protocol_.isLoaded()) {
-        snapshot.acCapabilities.minTempC = protocol_.profile().minTempC;
-        snapshot.acCapabilities.maxTempC = protocol_.profile().maxTempC;
+        const AcProtocolProfile& profile = protocol_.profile();
+        snapshot.acCapabilities.minTempC = profile.minTempC;
+        snapshot.acCapabilities.maxTempC = profile.maxTempC;
+        snapshot.acCapabilities.vaneCount = profile.vaneCount;
+        std::memcpy(snapshot.acCapabilities.vaneNames, profile.vaneNames, sizeof(profile.vaneNames));
+        for (size_t i = 0; i < profile.dataRequestCount; ++i) {
+            if (profile.dataRequests[i].report == AcReport::Compressor) {
+                snapshot.acCapabilities.reportsAction = true;
+            }
+        }
     }
     return snapshot;
 }
@@ -150,14 +183,15 @@ void AcModule::run()
         vTaskDelay(pdMS_TO_TICKS(20));
         return;
     }
-    nextPoll_ = now + kPollInterval;
+    nextPoll_ = now + (mhiLink_ ? pdMS_TO_TICKS(100) : kPollInterval);
 
     AcReportedState latest;
-    if (protocol_.poll(bus_, latest) == ESP_OK && latest.valid) {
-        reported_ = latest;
-        ESP_LOGD(kTag, "Poll returnAir=%.1f setTemp=%.1f", reported_.returnAirC,
-                 reported_.setTempC);
+    const esp_err_t pollError = mhiLink_ ? mhi::exchange(nullptr, latest) : protocol_.poll(bus_, latest);
+    if (pollError != ESP_OK || !latest.valid) {
+        reported_ = {};
+        return;
     }
+    reported_ = latest;
 }
 
 }  // namespace opencomfort

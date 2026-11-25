@@ -16,6 +16,7 @@ enum class RuntimeCommandSource : uint8_t {
     LocalWeb,
     HomeAssistantMqtt,
     Matter,
+    Schedule,
 };
 
 enum class RuntimeRequestStatus : uint8_t {
@@ -39,6 +40,10 @@ struct AcRuntimeCapabilities {
     bool supportsDry = true;
     bool supportsFan = true;
     bool supportsAuto = true;
+    // Vane positions from the profile, empty when the unit has none.
+    char vaneNames[kMaxAcVanes][kMaxAcVaneName + 1] = {};
+    size_t vaneCount = 0;
+    bool reportsAction = false;  // the profile reads the compressor
 };
 
 struct RuntimeSnapshot {

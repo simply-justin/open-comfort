@@ -2,6 +2,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <new>
 
 #include "sdkconfig.h"
 
@@ -29,13 +31,18 @@ const char* AcSetupProvider::moduleId() const
 
 bool AcSetupProvider::buildSchema(SetupSchema& out)
 {
-    out = SetupSchema{};
+    // Reset in place: `out = SetupSchema{}` would build a full temporary on the stack.
+    out.~SetupSchema();
+    new (&out) SetupSchema();
     std::strncpy(out.moduleId, "ac", sizeof(out.moduleId) - 1);
 
-    ProfileCatalog catalog;
-    if (ProfileRepository::loadCatalog(catalog) != ESP_OK || catalog.count == 0) {
+    // ~50 KB: far too big for a task stack.
+    std::unique_ptr<ProfileCatalog> catalogStorage(new (std::nothrow) ProfileCatalog());
+    if (!catalogStorage || ProfileRepository::loadCatalog(*catalogStorage) != ESP_OK ||
+        catalogStorage->count == 0) {
         return false;
     }
+    const ProfileCatalog& catalog = *catalogStorage;
 
     SetupStep& step = out.steps[0];
     std::strncpy(step.id, "ac_profile", sizeof(step.id) - 1);
@@ -79,12 +86,22 @@ bool AcSetupProvider::buildSchema(SetupSchema& out)
 
         for (size_t m = 0; m < entry.modelCount && modelField.optionCount < kMaxFieldOptions; ++m) {
             char value[49] = {};
-            std::snprintf(value, sizeof(value), "%s|%s", entry.id, entry.models[m]);
+            const int valueLen =
+                std::snprintf(value, sizeof(value), "%s|%s", entry.id, entry.models[m]);
+            // A cut-off value would select a different (or no) model, so skip it instead.
+            if (valueLen < 0 || static_cast<size_t>(valueLen) >= sizeof(value) ||
+                static_cast<size_t>(valueLen) >= sizeof(modelField.options[0].value)) {
+                continue;
+            }
             std::strncpy(modelField.options[modelField.optionCount].value, value,
                          sizeof(modelField.options[0].value) - 1);
+            // A shortened label is only cosmetic.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
             std::snprintf(modelField.options[modelField.optionCount].label,
                           sizeof(modelField.options[0].label), "%s (%s)", entry.models[m],
                           entry.makeName);
+#pragma GCC diagnostic pop
             modelField.optionCount++;
         }
     }

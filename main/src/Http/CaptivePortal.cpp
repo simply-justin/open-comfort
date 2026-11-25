@@ -1,7 +1,10 @@
 #include "src/Http/CaptivePortal.hpp"
+#include "src/Http/WebAssets.hpp"
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <new>
 #include <string>
 
 #include "src/Config/ConnectorSecretStore.hpp"
@@ -90,30 +93,6 @@ esp_err_t sendError(httpd_req_t* req, int status, const char* message)
     return sendJson(req, json, status);
 }
 
-esp_err_t sendFile(httpd_req_t* req, const char* path, const char* type)
-{
-    FILE* file = std::fopen(path, "r");
-    if (file == nullptr) {
-        return sendError(req, 404, "not_found");
-    }
-
-    httpd_resp_set_type(req, type);
-    char buffer[512];
-    while (true) {
-        const size_t n = std::fread(buffer, 1, sizeof(buffer), file);
-        if (n == 0) {
-            break;
-        }
-        if (httpd_resp_send_chunk(req, buffer, n) != ESP_OK) {
-            std::fclose(file);
-            httpd_resp_sendstr_chunk(req, nullptr);
-            return ESP_FAIL;
-        }
-    }
-    std::fclose(file);
-    return httpd_resp_send_chunk(req, nullptr, 0);
-}
-
 void dnsTask(void* /*arg*/)
 {
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
@@ -176,17 +155,22 @@ void dnsTask(void* /*arg*/)
 
 esp_err_t handleRoot(httpd_req_t* req)
 {
-    return sendFile(req, "/spiffs/www/index.html", "text/html");
+    return sendWebAsset(req, WebAsset::SetupHtml);
 }
 
 esp_err_t handleCss(httpd_req_t* req)
 {
-    return sendFile(req, "/spiffs/www/css/app.css", "text/css");
+    return sendWebAsset(req, WebAsset::AppCss);
+}
+
+esp_err_t handleFont(httpd_req_t* req)
+{
+    return sendWebAsset(req, WebAsset::Font);
 }
 
 esp_err_t handleJs(httpd_req_t* req)
 {
-    return sendFile(req, "/spiffs/www/js/app.js", "application/javascript");
+    return sendWebAsset(req, WebAsset::SetupJs);
 }
 
 esp_err_t handleSession(httpd_req_t* req)
@@ -198,6 +182,7 @@ esp_err_t handleSession(httpd_req_t* req)
     cJSON_AddBoolToObject(json, "moduleConfigured", g_ctx->moduleConfigured);
     cJSON_AddBoolToObject(json, "connectorsConfigured", g_ctx->connectorsConfigured);
     cJSON_AddBoolToObject(json, "matterSupported", g_ctx->product->supportsMatter);
+    cJSON_AddBoolToObject(json, "mqttSupported", g_ctx->product->supportsMqtt);
     // Same derivation as RuntimeHttpConnector::startMdns, so setup can show the runtime address.
     uint8_t mac[6] = {};
     if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
@@ -265,10 +250,12 @@ esp_err_t handleWifiPut(httpd_req_t* req)
 
 esp_err_t handleSetupSchema(httpd_req_t* req)
 {
-    SetupSchema schema;
-    if (!g_ctx->setup->buildSchema(schema)) {
+    // ~30 KB, so on the heap rather than the HTTP task stack.
+    std::unique_ptr<SetupSchema> schemaStorage(new (std::nothrow) SetupSchema());
+    if (!schemaStorage || !g_ctx->setup->buildSchema(*schemaStorage)) {
         return sendError(req, 500, "schema_unavailable");
     }
+    const SetupSchema& schema = *schemaStorage;
 
     cJSON* json = cJSON_CreateObject();
     cJSON_AddStringToObject(json, "moduleId", schema.moduleId);
@@ -390,9 +377,18 @@ esp_err_t handleConnectorsPut(httpd_req_t* req)
 
     const bool enableMqtt = cJSON_IsTrue(mqttEnabled);
     const bool enableMatter = cJSON_IsTrue(matterEnabled);
+    if (enableMqtt && !g_ctx->product->supportsMqtt) {
+        cJSON_Delete(root);
+        return sendError(req, 400, "mqtt_not_supported");
+    }
     if (enableMatter && !g_ctx->product->supportsMatter) {
         cJSON_Delete(root);
         return sendError(req, 400, "matter_not_supported");
+    }
+    // One smart-home integration at a time: both would show the unit twice in Home Assistant.
+    if (enableMqtt && enableMatter) {
+        cJSON_Delete(root);
+        return sendError(req, 400, "choose_one_integration");
     }
     if (enableMqtt &&
         (!cJSON_IsString(mqttHost) || mqttHost->valuestring == nullptr ||
@@ -485,6 +481,8 @@ esp_err_t startHttpServer(PortalContext& ctx)
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.max_uri_handlers = 16;
     config.stack_size = 8192;
+    // Phones open many keep-alive connections; recycle the oldest instead of refusing new ones.
+    config.lru_purge_enable = true;
 
     if (httpd_start(&ctx.server, &config) != ESP_OK) {
         return ESP_FAIL;
@@ -493,6 +491,7 @@ esp_err_t startHttpServer(PortalContext& ctx)
     const httpd_uri_t routeRoot = {"/", HTTP_GET, handleRoot, nullptr};
     const httpd_uri_t routeCss = {"/css/app.css", HTTP_GET, handleCss, nullptr};
     const httpd_uri_t routeJs = {"/js/app.js", HTTP_GET, handleJs, nullptr};
+    const httpd_uri_t routeFont = {"/fonts/geist.woff2", HTTP_GET, handleFont, nullptr};
     const httpd_uri_t routeSession = {"/api/v1/session", HTTP_GET, handleSession, nullptr};
     const httpd_uri_t routeScan = {"/api/v1/wifi/networks", HTTP_GET, handleWifiScan, nullptr};
     const httpd_uri_t routeWifi = {"/api/v1/wifi", HTTP_PUT, handleWifiPut, nullptr};
@@ -508,6 +507,7 @@ esp_err_t startHttpServer(PortalContext& ctx)
     httpd_register_uri_handler(ctx.server, &routeRoot);
     httpd_register_uri_handler(ctx.server, &routeCss);
     httpd_register_uri_handler(ctx.server, &routeJs);
+    httpd_register_uri_handler(ctx.server, &routeFont);
     httpd_register_uri_handler(ctx.server, &routeSession);
     httpd_register_uri_handler(ctx.server, &routeScan);
     httpd_register_uri_handler(ctx.server, &routeWifi);

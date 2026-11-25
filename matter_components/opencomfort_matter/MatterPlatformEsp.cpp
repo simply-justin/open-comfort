@@ -4,6 +4,7 @@
 
 #include "sdkconfig.h"
 
+#include <setup_payload/OnboardingCodesUtil.h>
 #include <app/server/Server.h>
 #include <app-common/zap-generated/ids/Attributes.h>
 #include <app-common/zap-generated/ids/Clusters.h>
@@ -189,6 +190,28 @@ esp_err_t MatterPlatform::openCommissioningWindow()
     const CHIP_ERROR err = manager.OpenBasicCommissioningWindow(
         kCommissioningWindow, chip::CommissioningWindowAdvertisement::kAllSupported);
     return err == CHIP_NO_ERROR ? ESP_OK : ESP_FAIL;
+}
+
+bool MatterPlatform::commissioningWindowOpen()
+{
+    return s_running &&
+           chip::Server::GetInstance().GetCommissioningWindowManager().IsCommissioningWindowOpen();
+}
+
+esp_err_t MatterPlatform::pairingCodes(char* qrPayload, size_t qrLength, char* manualCode,
+                                       size_t manualLength)
+{
+    if (!s_running || qrPayload == nullptr || manualCode == nullptr) return ESP_ERR_INVALID_STATE;
+    const chip::RendezvousInformationFlags flags(chip::RendezvousInformationFlag::kOnNetwork);
+    chip::MutableCharSpan qr(qrPayload, qrLength);
+    chip::MutableCharSpan manual(manualCode, manualLength);
+    if (GetQRCode(qr, flags) != CHIP_NO_ERROR || GetManualPairingCode(manual, flags) != CHIP_NO_ERROR) {
+        return ESP_FAIL;
+    }
+    // The spans report the written length; terminate for the C callers.
+    qrPayload[qr.size() < qrLength ? qr.size() : qrLength - 1] = '\0';
+    manualCode[manual.size() < manualLength ? manual.size() : manualLength - 1] = '\0';
+    return ESP_OK;
 }
 
 esp_err_t MatterPlatform::factoryReset()

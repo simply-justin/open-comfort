@@ -31,6 +31,8 @@ public:
     AcReportedState reportedState() const;
 
 private:
+    bool isValidDesired(const AcDesiredState& desired) const;
+
     const ProductDefinition& product_;
     UserConfig config_;
     LoadedAcProfile profile_{};
@@ -39,6 +41,7 @@ private:
     AcDesiredState desired_{};
     AcReportedState reported_{};
     TickType_t nextPoll_ = 0;
+    bool mhiLink_ = false;
     bool booted_ = false;
 };
 

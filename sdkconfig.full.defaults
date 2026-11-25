@@ -1,0 +1,3 @@
+# Full build: Home Assistant (MQTT) and Matter, one chosen in the portal.
+# Apply after sdkconfig.matter.defaults.
+CONFIG_OPENCOMFORT_PROFILE_FULL=y

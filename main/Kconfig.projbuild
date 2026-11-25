@@ -27,18 +27,26 @@ menu "OpenComfort Product"
 
     choice OPENCOMFORT_FIRMWARE_PROFILE
         prompt "Firmware capability profile"
-        default OPENCOMFORT_PROFILE_LEGACY_4MB
+        default OPENCOMFORT_PROFILE_HOME_ASSISTANT
 
-        config OPENCOMFORT_PROFILE_LEGACY_4MB
-            bool "Legacy 4 MB (web and Home Assistant MQTT)"
+        config OPENCOMFORT_PROFILE_HOME_ASSISTANT
+            bool "Home Assistant (MQTT), 4 MB flash"
 
-        config OPENCOMFORT_PROFILE_MATTER_16MB
-            bool "Matter 16 MB (web, MQTT, and Matter)"
+        config OPENCOMFORT_PROFILE_MATTER
+            bool "Matter, 8 or 16 MB flash"
+
+        config OPENCOMFORT_PROFILE_FULL
+            bool "Full: Home Assistant and Matter, 8 or 16 MB flash"
     endchoice
 
     config OPENCOMFORT_ENABLE_MATTER
         bool
-        default y if OPENCOMFORT_PROFILE_MATTER_16MB
+        default y if OPENCOMFORT_PROFILE_MATTER || OPENCOMFORT_PROFILE_FULL
+        default n
+
+    config OPENCOMFORT_ENABLE_MQTT
+        bool
+        default y if OPENCOMFORT_PROFILE_HOME_ASSISTANT || OPENCOMFORT_PROFILE_FULL
         default n
 
     config OPENCOMFORT_MATTER_DEVELOPMENT_CREDENTIALS
@@ -80,5 +88,32 @@ menu "OpenComfort Product"
         help
             How long the board factory-reset GPIO must be held to wipe
             user configuration and re-enter the captive portal.
+
+    config OPENCOMFORT_UPDATE_REPO
+        string "GitHub repository with firmware releases (owner/name)"
+        default "simply-justin/open-comfort"
+        help
+            The device checks the latest release of this repository daily and
+            offers the asset opencomfort-<variant>.bin for its own variant
+            (ha-4mb, matter-8mb, matter-16mb, full-8mb or full-16mb). Leave empty to turn
+            online updates off; uploading a file in the portal still works.
+
+    config OPENCOMFORT_POWER_CYCLE_RESET_COUNT
+        int "Factory reset after this many quick power cycles (0 = off)"
+        default 5
+        range 0 10
+        help
+            For devices without a reachable button: switching the power on this
+            many times in a row, each time for less than the window below, wipes
+            the configuration. Only power-on resets count; crashes, watchdog and
+            brownout resets break the sequence.
+
+    config OPENCOMFORT_POWER_CYCLE_WINDOW_MS
+        int "Quick power cycle window (ms)"
+        default 10000
+        range 3000 60000
+        help
+            A power-on counts towards a reset only if the device is switched off
+            again within this time.
 
 endmenu

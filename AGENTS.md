@@ -58,7 +58,8 @@ Never flash a connected device as part of routine validation.
 - `main/src/Profiles/`: AC profile catalog and loader.
 - `main/src/Bus/`: UART, SPI, and CAN transports.
 - `main/src/Modules/`: module implementations and factories.
-- `main/spiffs/`: files packaged into the SPIFFS image.
+- `main/www/`: setup and runtime portal UI, embedded in the app image.
+- `main/spiffs/`: files packaged into the SPIFFS image (bundled AC profiles).
 
 When adding source files, register them in `main/CMakeLists.txt`. Keep hardware
 pins and protocol values in product/board definitions and validated profiles

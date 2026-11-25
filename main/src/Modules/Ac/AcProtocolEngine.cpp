@@ -57,7 +57,47 @@ AcPlaceholder placeholderFromToken(const char* token)
     if (std::strcmp(token, "$FAN") == 0) {
         return AcPlaceholder::Fan;
     }
+    if (std::strcmp(token, "$VANES") == 0) {
+        return AcPlaceholder::Vanes;
+    }
     return AcPlaceholder::Literal;
+}
+
+bool parseMode(const char* text, uint8_t& out)
+{
+    static const char* const kNames[] = {"off", "cool", "heat", "dry", "fan", "auto"};
+    for (uint8_t i = 0; i < 6; ++i) {
+        if (std::strcmp(text, kNames[i]) == 0) {
+            out = i;  // AcMode order
+            return true;
+        }
+    }
+    return false;
+}
+
+bool parseFan(const char* text, uint8_t& out)
+{
+    static const char* const kNames[] = {"auto", "low", "medium", "high"};
+    for (uint8_t i = 0; i < 4; ++i) {
+        if (std::strcmp(text, kNames[i]) == 0) {
+            out = i;  // AcFanSpeed order
+            return true;
+        }
+    }
+    return false;
+}
+
+AcReport reportFromName(const char* name)
+{
+    if (name == nullptr) return AcReport::None;
+    static const struct { const char* name; AcReport report; } kReports[] = {
+        {"roomTemp", AcReport::RoomTemp}, {"setTemp", AcReport::SetTemp}, {"power", AcReport::Power},
+        {"mode", AcReport::Mode},         {"fan", AcReport::Fan},         {"vanes", AcReport::Vanes},
+        {"compressor", AcReport::Compressor}};
+    for (const auto& entry : kReports) {
+        if (std::strcmp(name, entry.name) == 0) return entry.report;
+    }
+    return AcReport::None;
 }
 
 }  // namespace
@@ -83,6 +123,21 @@ esp_err_t AcProtocolEngine::loadFromJson(const char* jsonText)
         }
         if (cJSON_IsNumber(maxTemp)) {
             profile_.maxTempC = maxTemp->valueint;
+        }
+        // "vanes": [{"name": "swing", "code": "0A"}, ...] in the order the UI shows them.
+        const cJSON* vanes = cJSON_GetObjectItem(capabilities, "vanes");
+        const cJSON* vane = nullptr;
+        cJSON_ArrayForEach(vane, vanes)
+        {
+            const cJSON* name = cJSON_GetObjectItem(vane, "name");
+            const cJSON* code = cJSON_GetObjectItem(vane, "code");
+            uint8_t value = 0;
+            if (profile_.vaneCount >= kMaxAcVanes || !cJSON_IsString(name) || !cJSON_IsString(code) ||
+                !parseHexByte(code->valuestring, value) || name->valuestring[0] == '\0') {
+                continue;
+            }
+            std::strncpy(profile_.vaneNames[profile_.vaneCount], name->valuestring, kMaxAcVaneName);
+            profile_.vaneCodes[profile_.vaneCount++] = value;
         }
     }
 
@@ -188,6 +243,47 @@ esp_err_t AcProtocolEngine::loadFromJson(const char* jsonText)
                 }
                 req.bytes[req.length++] = value;
             }
+            // What the reply means. Without "reports", RETURN-AIR and SET-TEMP keep their old
+            // meaning (whole degrees in the first byte).
+            const cJSON* reports = cJSON_GetObjectItem(item, "reports");
+            req.report = cJSON_IsString(reports) ? reportFromName(reports->valuestring)
+                         : std::strcmp(req.name, "RETURN-AIR") == 0 ? AcReport::RoomTemp
+                         : std::strcmp(req.name, "SET-TEMP") == 0   ? AcReport::SetTemp
+                                                                    : AcReport::None;
+            const cJSON* replyByte = cJSON_GetObjectItem(item, "byte");
+            if (cJSON_IsNumber(replyByte) && replyByte->valueint >= 0 && replyByte->valueint < 8) {
+                req.replyByte = static_cast<uint8_t>(replyByte->valueint);
+            }
+            const cJSON* mask = cJSON_GetObjectItem(item, "mask");
+            if (cJSON_IsString(mask)) (void)parseHexByte(mask->valuestring, req.mask);
+            const cJSON* scale = cJSON_GetObjectItem(item, "scale");
+            if (cJSON_IsNumber(scale)) req.scale = static_cast<float>(scale->valuedouble);
+            const cJSON* offset = cJSON_GetObjectItem(item, "offset");
+            if (cJSON_IsNumber(offset)) req.offset = static_cast<float>(offset->valuedouble);
+            const cJSON* map = cJSON_GetObjectItem(item, "map");
+            const cJSON* entry = nullptr;
+            cJSON_ArrayForEach(entry, map)
+            {
+                uint8_t raw = 0;
+                uint8_t value = 0;
+                bool known = cJSON_IsString(entry) && entry->string != nullptr &&
+                             parseHexByte(entry->string, raw);
+                if (known && req.report == AcReport::Mode) known = parseMode(entry->valuestring, value);
+                else if (known && req.report == AcReport::Fan) known = parseFan(entry->valuestring, value);
+                else if (known && req.report == AcReport::Vanes) {
+                    known = false;
+                    for (size_t v = 0; v < profile_.vaneCount; ++v) {
+                        if (std::strcmp(profile_.vaneNames[v], entry->valuestring) == 0) {
+                            value = static_cast<uint8_t>(v);
+                            known = true;
+                        }
+                    }
+                } else known = false;
+                if (known && req.mapCount < kMaxAcReportMap) {
+                    req.mapRaw[req.mapCount] = raw;
+                    req.mapValue[req.mapCount++] = value;
+                }
+            }
             if (req.name[0] != '\0' && req.length > 0) {
                 profile_.dataRequestCount++;
             }
@@ -265,6 +361,8 @@ uint8_t AcProtocolEngine::encodePlaceholder(AcPlaceholder placeholder,
                 case AcFanSpeed::Auto:
                 default: return 0x00;
             }
+        case AcPlaceholder::Vanes:
+            return desired.vanes < profile_.vaneCount ? profile_.vaneCodes[desired.vanes] : 0;
         case AcPlaceholder::Literal:
             return 0;
         case AcPlaceholder::None:
@@ -279,6 +377,11 @@ uint8_t AcProtocolEngine::placeholderMask(AcPlaceholder placeholder) const
         case AcPlaceholder::Power: return 0x01;
         case AcPlaceholder::Mode: return 0x07;
         case AcPlaceholder::Fan: return 0x03;
+        case AcPlaceholder::Vanes: {
+            uint8_t mask = 0;  // every bit any vane code uses
+            for (size_t i = 0; i < profile_.vaneCount; ++i) mask |= profile_.vaneCodes[i];
+            return mask;
+        }
         case AcPlaceholder::Temp: {
             // Every bit an encoded setpoint (clamped to maxTempC) can occupy.
             uint8_t mask = 0;
@@ -392,6 +495,7 @@ esp_err_t AcProtocolEngine::applyDesiredState(BusHandle& bus, const AcDesiredSta
     (void)applyCommand("set_mode", desired);
     (void)applyCommand("set_temperature", desired);
     (void)applyCommand("set_fan_speed", desired);
+    if (profile_.vaneCount > 0) (void)applyCommand("set_vanes", desired);
 
     const BusResult result = transmitFrame(bus, workingFrame_, profile_.frameSize);
     return result ? ESP_OK : ESP_FAIL;
@@ -414,12 +518,69 @@ esp_err_t AcProtocolEngine::poll(BusHandle& bus, AcReportedState& reported)
             continue;
         }
 
-        if (std::strcmp(req.name, "RETURN-AIR") == 0 && result.count > 0) {
-            reported.returnAirC = static_cast<float>(response[0]);
-            reported.valid = true;
-        } else if (std::strcmp(req.name, "SET-TEMP") == 0 && result.count > 0) {
-            reported.setTempC = static_cast<float>(response[0]);
-            reported.valid = true;
+        if (req.report == AcReport::None || static_cast<size_t>(result.count) <= req.replyByte) {
+            continue;
+        }
+        const uint8_t rawByte = response[req.replyByte];
+        // An idle or unconnected bus reads 0x00 or 0xFF; never report that as a temperature.
+        const uint8_t raw = static_cast<uint8_t>(rawByte & req.mask);
+        auto lookup = [&](uint8_t& out) {
+            for (size_t m = 0; m < req.mapCount; ++m) {
+                if (req.mapRaw[m] == raw) {
+                    out = req.mapValue[m];
+                    return true;
+                }
+            }
+            return false;
+        };
+        uint8_t mapped = 0;
+        switch (req.report) {
+            case AcReport::RoomTemp:
+            case AcReport::SetTemp: {
+                if (rawByte == 0x00 || rawByte == 0xFF) break;
+                const float value = raw * req.scale + req.offset;
+                if (value < -10.0f || value > 60.0f) break;
+                if (req.report == AcReport::RoomTemp) {
+                    reported.returnAirC = value;
+                    reported.hasRoomTemp = true;
+                } else {
+                    reported.setTempC = value;
+                    reported.hasSetTemp = true;
+                }
+                reported.valid = true;
+                break;
+            }
+            case AcReport::Power:
+                if (rawByte == 0xFF) break;
+                reported.powerOn = raw != 0;
+                reported.hasPower = reported.valid = true;
+                break;
+            case AcReport::Compressor:
+                if (rawByte == 0xFF) break;
+                reported.compressorRunning = raw != 0;
+                reported.hasCompressor = reported.valid = true;
+                break;
+            case AcReport::Mode:
+                if (lookup(mapped)) {
+                    reported.mode = static_cast<AcMode>(mapped);
+                    reported.hasMode = reported.valid = true;
+                }
+                break;
+            case AcReport::Fan:
+                if (lookup(mapped)) {
+                    reported.fan = static_cast<AcFanSpeed>(mapped);
+                    reported.hasFan = reported.valid = true;
+                }
+                break;
+            case AcReport::Vanes:
+                if (lookup(mapped)) {
+                    reported.vanes = mapped;
+                    reported.hasVanes = reported.valid = true;
+                }
+                break;
+            case AcReport::None:
+            default:
+                break;
         }
     }
     return ESP_OK;

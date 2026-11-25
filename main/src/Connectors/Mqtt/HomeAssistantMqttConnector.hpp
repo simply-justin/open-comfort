@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cJSON.h"
 #include "mqtt_client.h"
 
 #include "src/Config/ConnectorSecretStore.hpp"
@@ -28,7 +29,9 @@ private:
     void onConnected();
     void onData(const char* topic, int topicLength, const char* data, int dataLength);
     void publishDiscovery();
+    void publishEntity(const char* component, const char* object, cJSON* json);
     void publishState(bool force);
+    void publishExtras();
     void buildIdentity(const UserConfig& config);
 
     RuntimeController& runtime_;
@@ -39,10 +42,9 @@ private:
     char uri_[192] = {};
     char baseTopic_[96] = {};
     char availabilityTopic_[128] = {};
-    char modeCommandTopic_[128] = {};
-    char temperatureCommandTopic_[128] = {};
-    char fanCommandTopic_[128] = {};
     char discoveryTopic_[160] = {};
+    char haStatusTopic_[96] = {};
+    TickType_t nextExtrasAt_ = 0;
     char uniqueId_[48] = {};
     uint32_t publishedRevision_ = 0;
     TickType_t reconnectAt_ = 0;

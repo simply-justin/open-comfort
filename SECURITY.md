@@ -9,6 +9,7 @@ Please do **not** open a public issue for security problems. Report them private
 - The setup network uses a WPA2 password that is the same on every device unless `CONFIG_OPENCOMFORT_PORTAL_AP_PASSWORD` is overridden per device.
 - The runtime portal is plain HTTP on the local network. Keep devices on a trusted LAN or IoT network and never forward the port to the internet.
 - Flash encryption and Secure Boot are off by default, so anyone with physical access can read the flash.
+- Without Secure Boot, firmware updates are checked for integrity, chip and project name, but not signed. Anyone signed in to the portal can install firmware, and online updates trust whatever the configured GitHub repository publishes (downloads use HTTPS with certificate verification). Enable Secure Boot so only images signed with your key can boot.
 
 # Production security enablement
 
@@ -84,6 +85,8 @@ Put `sha256`, `signature`, and `url` into the remote catalog entry. Never commit
 private signing keys.
 
 ## Factory reset / re-provisioning
+
+Switching the power off and on 5 times in a row (each within 10 s) also performs a factory reset. Anyone with access to the power supply can therefore reset the device and take it over through setup; set `CONFIG_OPENCOMFORT_POWER_CYCLE_RESET_COUNT=0` where that matters.
 
 Hold the board factory-reset GPIO (rev-A default: GPIO0 / BOOT) for
 `CONFIG_OPENCOMFORT_FACTORY_RESET_HOLD_MS` (default 5s) at boot or during runtime.

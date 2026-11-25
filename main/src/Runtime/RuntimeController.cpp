@@ -111,10 +111,19 @@ bool RuntimeController::snapshotsDiffer(const RuntimeSnapshot& left, const Runti
            left.desired.powerOn != right.desired.powerOn ||
            left.desired.mode != right.desired.mode ||
            left.desired.targetTempC != right.desired.targetTempC ||
-           left.desired.fan != right.desired.fan ||
+           left.desired.fan != right.desired.fan || left.desired.vanes != right.desired.vanes ||
            left.reported.valid != right.reported.valid ||
            left.reported.returnAirC != right.reported.returnAirC ||
            left.reported.setTempC != right.reported.setTempC ||
+           left.reported.hasPower != right.reported.hasPower ||
+           left.reported.powerOn != right.reported.powerOn ||
+           left.reported.hasMode != right.reported.hasMode || left.reported.mode != right.reported.mode ||
+           left.reported.hasFan != right.reported.hasFan || left.reported.fan != right.reported.fan ||
+           left.reported.hasVanes != right.reported.hasVanes ||
+           left.reported.vanes != right.reported.vanes ||
+           left.reported.hasCompressor != right.reported.hasCompressor ||
+           left.reported.compressorRunning != right.reported.compressorRunning ||
+           left.acCapabilities.vaneCount != right.acCapabilities.vaneCount ||
            left.acCapabilities.minTempC != right.acCapabilities.minTempC ||
            left.acCapabilities.maxTempC != right.acCapabilities.maxTempC;
 }
