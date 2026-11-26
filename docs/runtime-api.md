@@ -103,9 +103,12 @@ OpenComfort settings, connector secrets, Wi-Fi, and Matter fabrics.
 
 All runtime endpoints are under `/api/v1`.
 
-- `POST /auth/login` creates an in-memory session (up to four at once; the oldest is
-  replaced) and sets the `HttpOnly` session cookie. Mutating requests require the returned
-  `csrfToken`, which differs from the cookie, in `X-OC-CSRF`.
+- `POST /auth/login` with `{"password": "...", "remember": true|false}` creates a session
+  (up to six at once) and sets the `HttpOnly` session cookie. A normal session lasts one hour
+  and ends at a restart. With `remember` it is stored in NVS (`oc_secrets`), the cookie lasts a
+  year, and it ends only at sign-out, a password change or a factory reset. When all slots are
+  taken, the short session that expires first is replaced. Mutating requests require the
+  returned `csrfToken`, which differs from the cookie, in `X-OC-CSRF`.
 - `GET /device` reports identity, `firmwareVersion` and build capabilities, including `ota`.
 - `GET /state` reports desired/reported state, revision, and limits.
 - `PUT /state` queues a state command and returns `202` with a request ID.

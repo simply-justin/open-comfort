@@ -268,6 +268,20 @@ void UpdateService::fail(const char* error)
     ESP_LOGW(kTag, "Update failed: %s", error);
 }
 
+bool UpdateService::reserve()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (busy_) return false;
+    busy_ = true;
+    return true;
+}
+
+void UpdateService::release()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    busy_ = false;
+}
+
 esp_err_t UpdateService::installNow()
 {
     {

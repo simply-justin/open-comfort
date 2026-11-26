@@ -205,9 +205,10 @@ esp_err_t handleLogin(httpd_req_t* request)
         return sendError(request, 400, "invalid_json");
     }
     const cJSON* password = cJSON_GetObjectItem(root, "password");
+    const bool remember = cJSON_IsTrue(cJSON_GetObjectItem(root, "remember"));
     const RuntimeHttpConnector::Session* session =
         (cJSON_IsString(password) && password->valuestring != nullptr)
-            ? self(request)->authenticate(password->valuestring)
+            ? self(request)->authenticate(password->valuestring, remember)
             : nullptr;
     cJSON_Delete(root);
     if (session == nullptr) {
@@ -215,9 +216,9 @@ esp_err_t handleLogin(httpd_req_t* request)
     }
 
     // Must outlive httpd_resp_send, which reads the header pointer.
-    char cookie[96];
-    std::snprintf(cookie, sizeof(cookie), "oc_session=%s; HttpOnly; SameSite=Strict; Path=/",
-                  session->token);
+    char cookie[128];
+    std::snprintf(cookie, sizeof(cookie), "oc_session=%s; HttpOnly; SameSite=Strict; Path=/%s",
+                  session->token, remember ? "; Max-Age=31536000" : "");
     httpd_resp_set_hdr(request, "Set-Cookie", cookie);
     cJSON* json = cJSON_CreateObject();
     cJSON_AddBoolToObject(json, "ok", true);
@@ -521,6 +522,13 @@ esp_err_t handleFirmwarePost(httpd_req_t* request)
         return sendError(request, 400, "firmware_size_invalid");
     }
 
+    // Only one writer for the inactive slot: an online download or this upload.
+    if (!UpdateService::instance().reserve()) return sendError(request, 409, "update_busy");
+    struct Reservation {
+        bool keep = false;  // after success the restart follows; no new download before it
+        ~Reservation() { if (!keep) UpdateService::instance().release(); }
+    } reservation;
+
     constexpr size_t kChunk = 4096;
     std::unique_ptr<char[]> bufferStorage(new (std::nothrow) char[kChunk]);
     if (!bufferStorage) {
@@ -589,6 +597,7 @@ esp_err_t handleFirmwarePost(httpd_req_t* request)
         return sendError(request, 500, "ota_activate_failed");
     }
 
+    reservation.keep = true;
     ESP_LOGI(kTag, "Firmware written to %s, restarting", target->label);
     self(request)->scheduleRestart();
     cJSON* json = cJSON_CreateObject();
@@ -1050,6 +1059,14 @@ esp_err_t RuntimeHttpConnector::start(const UserConfig& config)
 {
     if (server_ != nullptr) return ESP_OK;
     config_ = config;
+    // Restore sign-ins that asked to stay signed in; a size mismatch just starts empty.
+    if (ConnectorSecretStore::loadSessions(sessions_, sizeof(sessions_)) == ESP_OK) {
+        for (Session& session : sessions_) {
+            if (!session.remembered) session = Session{};
+        }
+    } else {
+        for (Session& session : sessions_) session = Session{};
+    }
     httpd_config_t httpConfig = HTTPD_DEFAULT_CONFIG();
     httpConfig.server_port = CONFIG_OPENCOMFORT_RUNTIME_HTTP_PORT;
     httpConfig.max_uri_handlers = 32;
@@ -1243,11 +1260,12 @@ bool constantTimeEquals(const char* a, const char* b, size_t length)
 
 bool expired(const RuntimeHttpConnector::Session& session, TickType_t now)
 {
-    return session.token[0] == '\0' || static_cast<int32_t>(now - session.expiresAt) >= 0;
+    return session.token[0] == '\0' ||
+           (!session.remembered && static_cast<int32_t>(now - session.expiresAt) >= 0);
 }
 }  // namespace
 
-const RuntimeHttpConnector::Session* RuntimeHttpConnector::authenticate(const char* password)
+const RuntimeHttpConnector::Session* RuntimeHttpConnector::authenticate(const char* password, bool remember)
 {
     const TickType_t now = xTaskGetTickCount();
     if (static_cast<int32_t>(now - nextLoginAllowedAt_) < 0) {
@@ -1261,20 +1279,26 @@ const RuntimeHttpConnector::Session* RuntimeHttpConnector::authenticate(const ch
 
     failedLoginAttempts_ = 0;
     nextLoginAllowedAt_ = 0;
-    // Reuse a free or expired slot, otherwise replace the one that expires first.
-    Session* slot = &sessions_[0];
+    // Reuse a free or expired slot, otherwise replace the short session that expires
+    // first; only when every slot is remembered does the first remembered one go.
+    Session* slot = nullptr;
     for (Session& candidate : sessions_) {
         if (expired(candidate, now)) {
             slot = &candidate;
             break;
         }
-        if (static_cast<int32_t>(candidate.expiresAt - slot->expiresAt) < 0) {
+        if (!candidate.remembered &&
+            (slot == nullptr || static_cast<int32_t>(candidate.expiresAt - slot->expiresAt) < 0)) {
             slot = &candidate;
         }
     }
+    if (slot == nullptr) slot = &sessions_[0];
+    const bool replacedRemembered = slot->remembered;
     randomHex(slot->token, 16);
     randomHex(slot->csrf, 16);
     slot->expiresAt = now + kSessionDuration;
+    slot->remembered = remember;
+    if (remember || replacedRemembered) saveRememberedSessions();
     return slot;
 }
 
@@ -1331,8 +1355,20 @@ bool RuntimeHttpConnector::isAuthorized(httpd_req_t* request, bool requireCsrf) 
 void RuntimeHttpConnector::logout(httpd_req_t* request)
 {
     if (Session* session = findSession(request)) {
+        const bool remembered = session->remembered;
         *session = Session{};
+        if (remembered) saveRememberedSessions();
     }
+}
+
+void RuntimeHttpConnector::saveRememberedSessions() const
+{
+    Session saved[kMaxSessions] = {};
+    for (size_t i = 0; i < kMaxSessions; ++i) {
+        if (sessions_[i].remembered) saved[i] = sessions_[i];
+    }
+    const esp_err_t err = ConnectorSecretStore::saveSessions(saved, sizeof(saved));
+    if (err != ESP_OK) ESP_LOGW(kTag, "Saving sign-ins failed: %s", esp_err_to_name(err));
 }
 
 void RuntimeHttpConnector::scheduleRestart()

@@ -52,6 +52,9 @@ public:
     esp_err_t setAutoInstall(bool enabled);
     esp_err_t setPrerelease(bool enabled);
     UpdateStatus status();
+    // A file upload holds the OTA slot too; false while a check or download runs.
+    bool reserve();
+    void release();
 
 private:
     UpdateService() = default;

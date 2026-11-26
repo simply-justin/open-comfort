@@ -31,10 +31,11 @@ public:
         char token[33] = {};  // cookie value (HttpOnly)
         char csrf[33] = {};   // returned to the page, sent back in X-OC-CSRF
         TickType_t expiresAt = 0;
+        bool remembered = false;  // kept across restarts until sign-out or a password change
     };
 
     // Returns the new session, or nullptr when the password is wrong or login is throttled.
-    const Session* authenticate(const char* password);
+    const Session* authenticate(const char* password, bool remember);
     bool isAuthorized(httpd_req_t* request, bool requireCsrf) const;
     void logout(httpd_req_t* request);
     // The 32-character oc_session value from a Cookie header, or nullptr. Exposed for tests.
@@ -60,9 +61,10 @@ private:
     httpd_handle_t server_ = nullptr;
     ConnectorStatus status_{"web", ConnectorState::Stopped, ESP_OK, 0};
     Session* findSession(httpd_req_t* request) const;
+    void saveRememberedSessions() const;
 
     // A few concurrent sign-ins (phone, laptop, tablet); the oldest is replaced when full.
-    static constexpr size_t kMaxSessions = 4;
+    static constexpr size_t kMaxSessions = 6;
     mutable Session sessions_[kMaxSessions] = {};
     TickType_t nextLoginAllowedAt_ = 0;
     uint8_t failedLoginAttempts_ = 0;

@@ -15,6 +15,7 @@ namespace {
 constexpr const char* kNamespace = "oc_secrets";
 constexpr const char* kMqttKey = "mqtt";
 constexpr const char* kAdminKey = "admin";
+constexpr const char* kSessionsKey = "sessions";
 constexpr uint32_t kPbkdf2Iterations = 50000;
 constexpr size_t kSaltSize = 16;
 constexpr size_t kHashSize = 32;
@@ -132,7 +133,20 @@ esp_err_t ConnectorSecretStore::setAdminPassword(const char* password)
     if (err != ESP_OK) {
         return err;
     }
-    return writeBlob(kAdminKey, &credential, sizeof(credential));
+    err = writeBlob(kAdminKey, &credential, sizeof(credential));
+    // A new password signs out every device that stayed signed in.
+    if (err == ESP_OK) err = eraseKey(kSessionsKey);
+    return err;
+}
+
+esp_err_t ConnectorSecretStore::saveSessions(const void* data, size_t size)
+{
+    return writeBlob(kSessionsKey, data, size);
+}
+
+esp_err_t ConnectorSecretStore::loadSessions(void* data, size_t size)
+{
+    return readBlob(kSessionsKey, data, size);
 }
 
 bool ConnectorSecretStore::adminPasswordConfigured()

@@ -243,6 +243,9 @@
         h("div", { class: "field", style: "margin-top:24px" },
           h("span", { class: "grow" }, h("label", { for: "password" }, "Portal password"),
             h("input", { id: "password", type: "password", autocomplete: "current-password", required: true }))),
+        h("label", { class: "row", style: "padding:0;min-height:44px;margin-top:8px" },
+          h("span", { class: "grow", style: "font-size:15px" }, "Keep me signed in"),
+          h("input", { id: "remember", class: "switch", type: "checkbox", checked: true })),
         h("p", { class: "note" }, "Forgot it? Switch the power off and on 5 times in a row, each time within 10 seconds. That resets the device and starts setup again."),
         ui.error ? h("p", { class: "alert", role: "alert", style: "margin-top:12px" }, ui.error) : null,
         h("div", { class: "spacer" }),
@@ -254,9 +257,10 @@
     ui.busy = true;
     ui.error = "";
     const password = document.getElementById("password").value;
+    const remember = document.getElementById("remember").checked;
     render();
     try {
-      const result = await api("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ password }) });
+      const result = await api("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ password, remember }) });
       ui.csrf = result.csrfToken;
       store.set(CSRF_KEY, ui.csrf);
       await openDashboard();
