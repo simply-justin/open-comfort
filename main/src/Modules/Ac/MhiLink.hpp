@@ -10,6 +10,10 @@ constexpr size_t extendedFrameSize = 33;
 bool decode(const uint8_t* frame, size_t length, AcReportedState& state);
 void encode(uint8_t* frame, const AcDesiredState* command, bool second, size_t length = frameSize);
 esp_err_t start(const BoardSpiPins& pins, bool extended);
+// Index of the wiring whose SCK the indoor unit clocks. Without a clock it returns the
+// wiring found last time (kept in NVS), or 0.
+size_t detectWiring(const MhiWiring* wirings, size_t count);
+int activeSckPin();
 uint32_t observedClockBursts();
 esp_err_t exchange(const AcDesiredState* command, AcReportedState& state);
 }

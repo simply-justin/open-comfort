@@ -677,7 +677,7 @@ esp_err_t handleStatus(httpd_req_t* request)
     if (std::strcmp(connector->config().ac.profileId, "mitsubishi_heavy_industries") == 0 &&
         connector->product().board != nullptr) {
         cJSON_AddNumberToObject(ac, "clockBursts", mhi::observedClockBursts());
-        cJSON_AddNumberToObject(ac, "sckPin", connector->product().board->mhi.sckPin);
+        cJSON_AddNumberToObject(ac, "sckPin", mhi::activeSckPin());
     }
     cJSON_AddBoolToObject(ac, "answering", snapshot.reported.valid);
     cJSON_AddNumberToObject(ac, "lastRequestId", snapshot.lastRequestId);

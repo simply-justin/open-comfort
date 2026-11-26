@@ -119,11 +119,11 @@ A valid signature and checksum are required before sending settings. A completed
 SPI transfer reports transmission, while actual operation requires testing on
 the connected indoor unit. The default rev-A configuration uses 20-byte frames.
 
-The XIAO ESP32-S3 attic controller uses 33-byte frames with a second checksum.
-Build with `-D OPENCOMFORT_MHI_BOARD=xiao-s3-attic` for SCK GPIO7, MOSI GPIO9
-and MISO GPIO8. CMake remembers the board in that build directory. Use
-`-D OPENCOMFORT_MHI_BOARD=rev-a` to restore the rev-A settings. The Status page
-reports clock bursts seen since boot when the AC does not answer.
-The Full 8 MB attic build looks for `opencomfort-full-8mb-xiao-attic.bin` during
-online updates. Until a matching release asset is published, install a locally
-built attic image through USB or the portal.
+The XIAO ESP32-S3 attic controller uses SCK GPIO7, MOSI GPIO9 and MISO GPIO8
+with 33-byte frames and a second checksum. One firmware serves both boards: at
+boot it counts clock edges on GPIO12 and GPIO7 for about 200 ms each, with
+pull-downs so an unwired pin stays quiet, and uses the wiring whose SCK the
+indoor unit clocks. The choice is kept in NVS (`oc_boot/mhi_wiring`, not erased by
+a factory reset) for boots where the unit is not clocking yet. The Status page
+reports the SCK pin in use and the clock bursts seen since boot when the AC does
+not answer.

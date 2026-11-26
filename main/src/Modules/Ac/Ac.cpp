@@ -51,7 +51,9 @@ void AcModule::bootstrap()
     mhiLink_ = profile_.bus == BusKind::Spi &&
                std::strcmp(profile_.profileId, "mitsubishi_heavy_industries") == 0;
     if (mhiLink_) {
-        const esp_err_t err = mhi::start(product_.board->mhi, product_.board->mhiExtendedFrames);
+        const MhiWiring& wiring =
+            product_.board->mhiWirings[mhi::detectWiring(product_.board->mhiWirings, kMhiWiringCount)];
+        const esp_err_t err = mhi::start(wiring.pins, wiring.extendedFrames);
         if (err != ESP_OK) {
             ESP_LOGE(kTag, "MHI SPI peripheral initialization failed: %s", esp_err_to_name(err));
             return;

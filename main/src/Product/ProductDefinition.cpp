@@ -7,11 +7,7 @@ namespace {
 
 #if CONFIG_OPENCOMFORT_BOARD_REV_A
 constexpr BoardDefinition kBoardRevA = {
-#ifdef OC_MHI_XIAO_ATTIC
-    .revision = "xiao-s3-attic",
-#else
     .revision = "rev-a",
-#endif
     .uart =
         {
             .port = UART_NUM_1,
@@ -27,13 +23,12 @@ constexpr BoardDefinition kBoardRevA = {
             .misoPin = GPIO_NUM_13,
             .csPin = GPIO_NUM_10,
         },
-#ifdef OC_MHI_XIAO_ATTIC
-    .mhi = {SPI2_HOST, GPIO_NUM_7, GPIO_NUM_9, GPIO_NUM_8, GPIO_NUM_NC},
-    .mhiExtendedFrames = true,
-#else
-    .mhi = {SPI2_HOST, GPIO_NUM_12, GPIO_NUM_11, GPIO_NUM_13, GPIO_NUM_NC},
-    .mhiExtendedFrames = false,
-#endif
+    .mhiWirings =
+        {
+            {"rev-a", {SPI2_HOST, GPIO_NUM_12, GPIO_NUM_11, GPIO_NUM_13, GPIO_NUM_NC}, false},
+            // XIAO ESP32-S3 attic controller: 33-byte frames.
+            {"xiao-s3-attic", {SPI2_HOST, GPIO_NUM_7, GPIO_NUM_9, GPIO_NUM_8, GPIO_NUM_NC}, true},
+        },
     .can =
         {
             .txPin = GPIO_NUM_1,

@@ -3,7 +3,12 @@
 
 #include <cmath>
 #include <cstring>
+#include "driver/gpio.h"
+#include "driver/pulse_cnt.h"
 #include "driver/rmt_rx.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "nvs.h"
 #include "driver/spi_slave.h"
 #include "esp_rom_gpio.h"
 #include "soc/gpio_sig_map.h"
@@ -28,6 +33,7 @@ volatile bool clockFault = false;
 portMUX_TYPE selectLock = portMUX_INITIALIZER_UNLOCKED;
 bool selectNext = false;
 bool armed = false;
+int sckPin = -1;
 uint32_t clockBursts = 0;
 
 void IRAM_ATTR ready(spi_slave_transaction_t*)
@@ -141,6 +147,7 @@ void encode(uint8_t* frame, const AcDesiredState* command, bool second, size_t l
 esp_err_t start(const BoardSpiPins& pins, bool extended)
 {
     wireSize = extended ? extendedFrameSize : frameSize;
+    sckPin = pins.sckPin;
     ESP_LOGI("MhiLink", "CNS SCK=%d MOSI=%d MISO=%d frame=%u", pins.sckPin, pins.mosiPin, pins.misoPin, unsigned(wireSize));
     host = pins.host;
     spi_bus_config_t bus{};
@@ -180,6 +187,80 @@ esp_err_t start(const BoardSpiPins& pins, bool extended)
         ESP_ERROR_CHECK_WITHOUT_ABORT(spi_slave_free(host));
     }
     return err;
+}
+
+namespace {
+constexpr const char* kWiringNamespace = "oc_boot";  // survives a factory reset, like the hardware
+constexpr const char* kWiringKey = "mhi_wiring";
+
+// Rising edges on `pin` within ~200 ms, read every 10 ms so a fast clock cannot wrap the counter.
+int clockEdges(gpio_num_t pin)
+{
+    pcnt_unit_config_t unitConfig{};
+    unitConfig.low_limit = -1;
+    unitConfig.high_limit = 32767;
+    pcnt_unit_handle_t unit = nullptr;
+    if (pcnt_new_unit(&unitConfig, &unit) != ESP_OK) return 0;
+    pcnt_chan_config_t channelConfig{};
+    channelConfig.edge_gpio_num = pin;
+    channelConfig.level_gpio_num = -1;
+    pcnt_channel_handle_t channel = nullptr;
+    int edges = 0;
+    if (pcnt_new_channel(unit, &channelConfig, &channel) == ESP_OK) {
+        // A pin that is not wired (floating) must not count as a clock.
+        gpio_pulldown_en(pin);
+        pcnt_channel_set_edge_action(channel, PCNT_CHANNEL_EDGE_ACTION_INCREASE,
+                                     PCNT_CHANNEL_EDGE_ACTION_HOLD);
+        if (pcnt_unit_enable(unit) == ESP_OK) {
+            pcnt_unit_clear_count(unit);
+            pcnt_unit_start(unit);
+            for (int i = 0; i < 20 && edges < 1000; ++i) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+                int count = 0;
+                pcnt_unit_get_count(unit, &count);
+                pcnt_unit_clear_count(unit);
+                edges += count;
+            }
+            pcnt_unit_stop(unit);
+            pcnt_unit_disable(unit);
+        }
+        pcnt_del_channel(channel);
+    }
+    pcnt_del_unit(unit);
+    gpio_reset_pin(pin);
+    return edges;
+}
+}  // namespace
+
+size_t detectWiring(const MhiWiring* wirings, size_t count)
+{
+    uint8_t stored = 0;
+    nvs_handle_t handle = 0;
+    if (nvs_open(kWiringNamespace, NVS_READONLY, &handle) == ESP_OK) {
+        (void)nvs_get_u8(handle, kWiringKey, &stored);
+        nvs_close(handle);
+    }
+    if (stored >= count) stored = 0;
+
+    // A clocking indoor unit gives hundreds of edges; noise or crosstalk a few.
+    constexpr int kMinEdges = 32;
+    for (size_t i = 0; i < count; ++i) {
+        const int edges = clockEdges(wirings[i].pins.sckPin);
+        ESP_LOGI("MhiLink", "Clock edges on GPIO%d (%s): %d", wirings[i].pins.sckPin, wirings[i].name, edges);
+        if (edges < kMinEdges) continue;
+        if (i != stored && nvs_open(kWiringNamespace, NVS_READWRITE, &handle) == ESP_OK) {
+            if (nvs_set_u8(handle, kWiringKey, static_cast<uint8_t>(i)) == ESP_OK) (void)nvs_commit(handle);
+            nvs_close(handle);
+        }
+        return i;
+    }
+    ESP_LOGW("MhiLink", "No AC clock found; using %s", wirings[stored].name);
+    return stored;
+}
+
+int activeSckPin()
+{
+    return sckPin;
 }
 
 uint32_t observedClockBursts()

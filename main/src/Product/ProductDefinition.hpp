@@ -32,12 +32,19 @@ struct BoardCanPins {
     gpio_num_t rxPin = GPIO_NUM_NC;
 };
 
+// One way to wire the MHI CNS connector; the firmware picks it at boot.
+struct MhiWiring {
+    const char* name;
+    BoardSpiPins pins;
+    bool extendedFrames;
+};
+constexpr size_t kMhiWiringCount = 2;
+
 struct BoardDefinition {
     const char* revision;
     BoardUartPins uart;
     BoardSpiPins spi;
-    BoardSpiPins mhi;
-    bool mhiExtendedFrames;
+    MhiWiring mhiWirings[kMhiWiringCount];  // chosen by which SCK the indoor unit clocks
     BoardCanPins can;
     gpio_num_t factoryResetPin;
     int maxSpiClockHz;

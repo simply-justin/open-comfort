@@ -90,23 +90,20 @@ int64_t parseReleaseVersion(const char* version)
     return ((static_cast<int64_t>(major) * 10000 + minor) * 10000 + patch) * 1000 + stage;
 }
 
+// One image per flash layout; the MHI wiring is detected at boot.
 const char* updateVariant()
 {
 #if CONFIG_OPENCOMFORT_PROFILE_FULL && CONFIG_ESPTOOLPY_FLASHSIZE_8MB
-    constexpr char base[] = "full-8mb";
+    return "full-8mb";
 #elif CONFIG_OPENCOMFORT_PROFILE_FULL
-    constexpr char base[] = "full-16mb";
+    return "full-16mb";
 #elif CONFIG_OPENCOMFORT_PROFILE_MATTER && CONFIG_ESPTOOLPY_FLASHSIZE_8MB
-    constexpr char base[] = "matter-8mb";
+    return "matter-8mb";
 #elif CONFIG_OPENCOMFORT_PROFILE_MATTER
-    constexpr char base[] = "matter-16mb";
+    return "matter-16mb";
 #else
-    constexpr char base[] = "ha-4mb";
+    return "ha-4mb";
 #endif
-    // Pin routing differs between boards even when their flash layout matches.
-    static const std::string variant = std::string(base) +
-        (std::strcmp(currentProduct().board->revision, "xiao-s3-attic") == 0 ? "-xiao-attic" : "");
-    return variant.c_str();
 }
 
 UpdateService& UpdateService::instance()

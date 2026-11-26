@@ -32,11 +32,6 @@ jobs:
           - variant: full-16mb
             defaults: sdkconfig.defaults;sdkconfig.matter.defaults;sdkconfig.full.defaults
             matter: "ON"
-          # XIAO ESP32-S3 with the MHI attic wiring; the device appends "-xiao-attic".
-          - variant: full-8mb-xiao-attic
-            defaults: sdkconfig.defaults;sdkconfig.matter.defaults;sdkconfig.full.defaults;sdkconfig.8mb.defaults
-            matter: "ON"
-            board: xiao-s3-attic
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,7 +43,6 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           . "$IDF_PATH/export.sh"
           idf.py -B build -D OPENCOMFORT_MATTER=${{ matrix.matter }} \
-            -D OPENCOMFORT_MHI_BOARD=${{ matrix.board || 'rev-a' }} \
             -D SDKCONFIG=build/sdkconfig -D SDKCONFIG_DEFAULTS="${{ matrix.defaults }}" build
 
       - name: Check the version matches the tag
@@ -59,12 +53,19 @@ jobs:
           test "$version" = "$GITHUB_REF_NAME"
 
       - name: Name the image
-        run: cp build/OpenComfort.bin opencomfort-${{ matrix.variant }}.bin
+        shell: bash
+        run: |
+          cp build/OpenComfort.bin opencomfort-${{ matrix.variant }}.bin
+          # Builds up to v0.2.0-beta.3 for the XIAO attic board look for this name; the
+          # image is the same, as the board is now detected at boot.
+          if [ "${{ matrix.variant }}" = full-8mb ]; then
+            cp build/OpenComfort.bin opencomfort-full-8mb-xiao-attic.bin
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: opencomfort-${{ matrix.variant }}
-          path: opencomfort-${{ matrix.variant }}.bin
+          path: opencomfort-*.bin
 
   release:
     needs: build

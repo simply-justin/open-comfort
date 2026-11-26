@@ -71,11 +71,3 @@ spiffs_create_partition_image(storage spiffs FLASH_IN_PROJECT)
 
 # Task stacks are 4-8 KB; fail the build if a function would need more than 4 KB of stack.
 target_compile_options(${COMPONENT_LIB} PRIVATE -Werror=stack-usage=4096)
-
-# Select the MHI wiring and frame format together to match the controller.
-set(OPENCOMFORT_MHI_BOARD "rev-a" CACHE STRING "MHI board: rev-a or xiao-s3-attic")
-if(OPENCOMFORT_MHI_BOARD STREQUAL "xiao-s3-attic")
-    set_property(SOURCE src/Product/ProductDefinition.cpp APPEND PROPERTY COMPILE_DEFINITIONS OC_MHI_XIAO_ATTIC)
-elseif(NOT OPENCOMFORT_MHI_BOARD STREQUAL "rev-a")
-    message(FATAL_ERROR "Unknown OPENCOMFORT_MHI_BOARD: ${OPENCOMFORT_MHI_BOARD}")
-endif()
