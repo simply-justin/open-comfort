@@ -7,8 +7,9 @@
 
 namespace opencomfort {
 
-constexpr size_t kMaxCatalogEntries = 32;
-constexpr size_t kMaxModelsPerProfile = 16;
+// A catalog is held in RAM during setup next to Wi-Fi and TLS: ~1.2 KB per entry.
+constexpr size_t kMaxCatalogEntries = 16;
+constexpr size_t kMaxModelsPerProfile = 8;
 constexpr size_t kMaxMakeNameLen = 64;
 constexpr size_t kMaxUrlLen = 160;
 constexpr size_t kMaxShaHexLen = 64;

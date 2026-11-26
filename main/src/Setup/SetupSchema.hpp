@@ -6,8 +6,8 @@
 namespace opencomfort {
 
 // Sized to what modules use (AC: one step, three fields). Each field holds every option,
-// so these multiply quickly: 2 x 4 fields is ~30 KB, built on the heap.
-constexpr size_t kMaxSetupSteps = 2;
+// so these multiply quickly: 1 x 4 fields is ~15 KB, built on the heap during setup.
+constexpr size_t kMaxSetupSteps = 1;
 constexpr size_t kMaxSetupFields = 4;
 constexpr size_t kMaxFieldOptions = 32;
 

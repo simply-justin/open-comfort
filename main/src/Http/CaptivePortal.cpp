@@ -16,6 +16,7 @@
 
 extern "C" {
 #include "cJSON.h"
+#include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -292,6 +293,9 @@ esp_err_t handleSetupSchema(httpd_req_t* req)
         if (!WiFiService::isStationConnected() ||
             ProfileRepository::refreshRemoteCatalog(*g_ctx->product) != ESP_OK ||
             !g_ctx->setup->buildSchema(*schemaStorage)) {
+            ESP_LOGW(kTag, "No profile list (heap free %u, largest block %u)",
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
             return sendError(req, 503, "profiles_unavailable");
         }
     }

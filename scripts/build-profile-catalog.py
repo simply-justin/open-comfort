@@ -27,7 +27,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 ROOT = Path(__file__).resolve().parent.parent
 # Limits from main/src/Profiles/ProfileTypes.hpp; longer values would be cut off on the device.
-MAX_ENTRIES, MAX_MODELS, MAX_ID, MAX_MAKE_NAME, MAX_VERSION, MAX_URL = 32, 16, 48, 64, 16, 160
+MAX_ENTRIES, MAX_MODELS, MAX_ID, MAX_MAKE_NAME, MAX_VERSION, MAX_URL = 16, 8, 48, 64, 16, 160
 MAX_CATALOG_BYTES = 48 * 1024  # HttpDownloader limit in ProfileRepository.cpp
 BUSES = {"uart", "spi", "can"}
 

@@ -7,6 +7,7 @@ idf_component_register(
     SRCS
         main.cpp
         src/Application/Application.cpp
+        src/Platform/NothrowNew.cpp
         src/Product/ProductDefinition.cpp
         src/Config/UserConfigStore.cpp
         src/Config/DeviceHostname.cpp

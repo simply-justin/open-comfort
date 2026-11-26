@@ -41,12 +41,12 @@ The catalog file itself is not signed, so a device ignores `path` in it: an entr
 |---|---|
 | `id` | Stable profile identifier, stored in the user configuration. At most 48 bytes, also together with `\|` and each model |
 | `make` / `makeName` | Make identifier and the label shown in setup |
-| `models` | Models offered in setup, at most 16 |
+| `models` | Models offered in setup, at most 8 |
 | `bus` | `spi`, `uart` or `can`. Must be allowed by the product |
 | `profileVersion` | Version string, part of the signed message. Raise it with every change |
 | `file` | The profile's file name in `profiles/` |
 
-The workflow replaces `file` with `url`, `sha256` and `signature` in the published catalog. `scripts/build-profile-catalog.py` checks the limits above and refuses a catalog over 48 KiB or with more than 32 entries.
+The workflow replaces `file` with `url`, `sha256` and `signature` in the published catalog. `scripts/build-profile-catalog.py` checks the limits above and refuses a catalog over 48 KiB or with more than 16 entries.
 
 ## Profile format
 
