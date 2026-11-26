@@ -193,8 +193,18 @@ esp_err_t WiFiService::connectStation(const WifiCredentials& credentials, uint32
                  sizeof(sta.sta.password) - 1);
     sta.sta.threshold.authmode = authThreshold(credentials.password);
 
+    // The driver refuses a new connection while one is up ("disconnect before connecting
+    // to new ap"), e.g. when stored credentials joined at boot: leave it first.
+    wifi_ap_record_t current{};
+    if (esp_wifi_sta_get_ap_info(&current) == ESP_OK) {
+        xEventGroupClearBits(s_events, kFailBit);
+        esp_wifi_disconnect();
+        xEventGroupWaitBits(s_events, kFailBit, pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
+    }
+
     xEventGroupClearBits(s_events, kConnectedBit | kFailBit);
     s_staState = WifiStaState::Connecting;
+    s_lastReason = 0;
 
     wifi_mode_t mode = WIFI_MODE_STA;
     esp_wifi_get_mode(&mode);
