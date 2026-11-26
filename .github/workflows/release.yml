@@ -74,11 +74,6 @@ jobs:
         shell: bash
         run: |
           cp build/OpenComfort.signed.bin opencomfort-${{ matrix.variant }}.bin
-          # Builds up to v0.2.0-beta.3 for the XIAO attic board look for this name; the
-          # image is the same, as the board is now detected at boot.
-          if [ "${{ matrix.variant }}" = full-8mb ]; then
-            cp build/OpenComfort.signed.bin opencomfort-full-8mb-xiao-attic.bin
-          fi
 
       - uses: actions/upload-artifact@v4
         with:
