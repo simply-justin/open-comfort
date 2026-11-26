@@ -1,10 +1,10 @@
 # Architecture
 
-OpenComfort is a single ESP-IDF application in C++ for the ESP32-S3. It is built around four rules:
+OpenComfort is a single ESP-IDF application in C++ for the ESP32-S3. It splits into a **platform** (setup, Wi-Fi, portal, connectors, updates, storage, schedules, logging) and **modules** that implement a device type behind `IModule`. The AC bridge is the first module. It is built around four rules:
 
 1. **The product is fixed at build time.** Kconfig selects the module, board revision and capability profile. Users never configure pins.
 2. **One runtime state, one writer.** Every control surface submits commands to `RuntimeController`. Only the application task touches the bus.
-3. **Vendor behaviour lives in profiles.** Frame layouts and command encodings are JSON, not C++.
+3. **Vendor behaviour lives in profiles.** Frame layouts and command encodings are JSON, not C++, so a module supports new devices without code changes.
 4. **Secrets stay out of the user configuration.** Wi-Fi, administrator and MQTT credentials have their own storage.
 
 ## Boot sequence

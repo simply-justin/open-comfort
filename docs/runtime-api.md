@@ -2,7 +2,7 @@
 
 OpenComfort has one canonical runtime state. The local web, Home Assistant MQTT,
 and Matter connectors submit bounded commands to `RuntimeController`; only the
-application task applies commands to the AC bus. Connector callbacks never call
+application task applies commands to the module's bus. Connector callbacks never call
 UART, SPI, or CAN directly.
 
 ## Product profiles
