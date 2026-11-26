@@ -76,9 +76,11 @@ menu "OpenComfort Product"
 
     config OPENCOMFORT_PROFILE_CATALOG_URL
         string "Remote profile catalog URL"
-        default ""
+        default "https://simply-justin.github.io/open-comfort/profiles/index.json"
         help
-            Optional HTTPS URL for remote AC profile catalog retrieval.
+            HTTPS URL of the signed AC profile catalog, published by the profiles workflow.
+            The device downloads it after joining Wi-Fi and keeps the profiles it uses in
+            SPIFFS. Empty disables downloads; then only profiles already in SPIFFS load.
             Leave empty to use the bundled SPIFFS catalog only.
 
     config OPENCOMFORT_FACTORY_RESET_HOLD_MS

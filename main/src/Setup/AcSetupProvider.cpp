@@ -69,6 +69,10 @@ bool AcSetupProvider::buildSchema(SetupSchema& out)
 
     for (size_t i = 0; i < catalog.count; ++i) {
         const ProfileCatalogEntry& entry = catalog.entries[i];
+        // An id can be listed twice (download and an older SPIFFS copy); show it once.
+        bool seen = false;
+        for (size_t j = 0; j < i && !seen; ++j) seen = std::strcmp(catalog.entries[j].id, entry.id) == 0;
+        if (seen) continue;
         bool makeExists = false;
         for (size_t j = 0; j < makeField.optionCount; ++j) {
             if (std::strcmp(makeField.options[j].value, entry.makeId) == 0) {

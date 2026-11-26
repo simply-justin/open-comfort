@@ -2,13 +2,23 @@
 
 A **profile** is a JSON file that tells OpenComfort how to talk to an air-conditioner family: which bus it uses, how big a frame is, how commands are encoded and which registers to poll. A **catalog** lists the profiles and the models they cover, so setup can offer a make and model list.
 
-## Bundled and remote catalogs
+## Where profiles come from
 
-The bundled catalog is `main/spiffs/profiles/index.json`. It ships in the SPIFFS image and is trusted as part of the firmware. Portal (OTA) updates replace only the app, so changes to bundled profiles reach a device through a USB flash or the remote catalog.
+Profiles are not part of the firmware. They live in [`profiles/`](../profiles) in this repository. On every push to `main` that touches that folder, the **Profiles** workflow (`.github/workflows/profiles.yml`) signs each profile and publishes the catalog on GitHub Pages:
 
-When `CONFIG_OPENCOMFORT_PROFILE_CATALOG_URL` is set, the device also downloads a remote catalog over HTTPS after it joins Wi-Fi. Remote entries are merged with the bundled ones; a bundled entry with the same id wins. A remote profile is only used after its SHA-256 and ECDSA signature check out, and the check runs again each time it loads from SPIFFS. The remote catalog is not signed itself, so its `path` field is ignored: a remote entry can only point to a signed download.
+```text
+https://simply-justin.github.io/open-comfort/profiles/index.json
+```
+
+That URL is `CONFIG_OPENCOMFORT_PROFILE_CATALOG_URL`. A device downloads the catalog during setup (right after it joins Wi-Fi) and again at every boot. It downloads the profile it uses, checks its SHA-256 and ECDSA P-256 signature, and keeps it in SPIFFS, so it keeps working without internet. Each load from SPIFFS repeats the check. When the catalog lists a new version, the device fetches it at the next boot.
+
+So adding or fixing a profile needs no firmware build: merge it, wait for the workflow, and restart the device.
+
+The catalog file itself is not signed, so a device ignores `path` in it: an entry can only point to a signed download. Devices flashed over USB before this change still have the profiles that were bundled in SPIFFS; a downloaded profile with the same id takes precedence, and the old copy is only used when nothing can be downloaded.
 
 ## Catalog format
+
+`profiles/index.json` is the source list:
 
 ```json
 {
@@ -20,10 +30,8 @@ When `CONFIG_OPENCOMFORT_PROFILE_CATALOG_URL` is set, the device also downloads 
       "makeName": "Mitsubishi Heavy Industries",
       "models": ["SRK25ZSX", "SRK35ZSX", "Generic"],
       "bus": "spi",
-      "profileVersion": "1.0.0",
-      "path": "profiles/mhi.json",
-      "sha256": "37360adf…",
-      "bundled": true
+      "profileVersion": "1.1.0",
+      "file": "mhi.json"
     }
   ]
 }
@@ -31,22 +39,18 @@ When `CONFIG_OPENCOMFORT_PROFILE_CATALOG_URL` is set, the device also downloads 
 
 | Field | Description |
 |---|---|
-| `id` | Stable profile identifier, stored in the user configuration |
+| `id` | Stable profile identifier, stored in the user configuration. At most 48 bytes, also together with `\|` and each model |
 | `make` / `makeName` | Make identifier and the label shown in setup |
 | `models` | Models offered in setup, at most 16 |
 | `bus` | `spi`, `uart` or `can`. Must be allowed by the product |
-| `profileVersion` | Version string, also part of the signed message |
-| `path` | Location of a bundled profile under `/spiffs` |
-| `url` | HTTPS location of a remote profile |
-| `sha256` | SHA-256 of the profile file, lowercase hex |
-| `signature` | ECDSA P-256 signature, hex. Required for remote profiles |
-| `bundled` | `true` for profiles shipped in SPIFFS |
+| `profileVersion` | Version string, part of the signed message. Raise it with every change |
+| `file` | The profile's file name in `profiles/` |
 
-A catalog holds at most 32 entries. Downloads are limited to 48 KiB.
+The workflow replaces `file` with `url`, `sha256` and `signature` in the published catalog. `scripts/build-profile-catalog.py` checks the limits above and refuses a catalog over 48 KiB or with more than 32 entries.
 
 ## Profile format
 
-The reference profile is [`main/spiffs/profiles/mhi.json`](../main/spiffs/profiles/mhi.json).
+The reference profile is [`profiles/mhi.json`](../profiles/mhi.json).
 
 | Field | Description |
 |---|---|
@@ -91,27 +95,26 @@ A token is a hex literal or one of these variables:
 
 Every 2 seconds the module sends each `data` request and reads the reply. `RETURN-AIR` and `SET-TEMP` are mapped to the reported room and set temperature (first reply byte, in °C). Other registers are polled but not yet reported.
 
-## Signing a remote profile
+## Signing
+
+The workflow signs with the `OPENCOMFORT_PROFILE_SIGNING_KEY` secret (an ECDSA P-256 private key). The signed message is `<id>|<sha256>|<profileVersion>`. The matching public key is embedded in `main/src/Profiles/ProfileCrypto.cpp`. To check a catalog locally:
 
 ```sh
-python3 scripts/sign-profile.py \
-  --key keys/profile_signing_private.pem \
-  --profile path/to/profile.json \
-  --profile-id my_profile \
-  --version 1.0.0
+python3 scripts/build-profile-catalog.py --key profile-signing-key.pem \
+  --base-url https://simply-justin.github.io/open-comfort/profiles --out site/profiles
 ```
 
-The script prints `sha256` and `signature`. The signed message is `<id>|<sha256>|<profileVersion>`. Put both values and the profile's HTTPS `url` in the remote catalog entry. The matching public key is embedded in `main/src/Profiles/ProfileCrypto.cpp`. Key handling is described in [SECURITY.md](../SECURITY.md#profile-signing). Never commit private keys.
+Key handling is described in [SECURITY.md](../SECURITY.md#profile-signing). Never commit private keys.
 
 ## Adding an air conditioner
 
 1. **Learn the protocol.** Use community documentation or capture traffic between the unit and its wired remote. Note the bus, levels and frame layout.
 2. **Write the profile.** Start from `mhi.json` and adapt `protocol`, `frameSize`, `capabilities`, `data` and the four commands.
-3. **Bundle it.** Add the file under `main/spiffs/profiles/` and an entry with its `sha256` to `index.json`.
+3. **List it.** Add the file under `profiles/` and an entry to `profiles/index.json`. After the merge the Profiles workflow publishes it; no firmware build is needed.
 4. **Test on hardware.** Run setup, select the model and compare the frames on a logic analyser with the original remote.
 5. **Contribute.** Open a pull request with the models you tested, the connector and any limitations.
 
-The bundled Mitsubishi Heavy Industries profile uses the dedicated 20-byte CNS
+The Mitsubishi Heavy Industries profile uses the dedicated 20-byte CNS
 codec. The indoor unit supplies SCK and MOSI. On rev-A these are inputs GPIO12
 and GPIO11, and GPIO13 supplies MISO. No external CS is used. The peripheral
 uses mode 3, least-significant bit first, and synchronizes on gaps in SCK.

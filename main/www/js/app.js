@@ -40,6 +40,7 @@
     mqtt_not_supported: "This firmware has no Home Assistant (MQTT) support.",
     wifi_connect_failed: "Could not join. Check the password and try again.",
     request_failed: "The device did not answer. Check that you are still on the OpenComfort network.",
+    profiles_unavailable: "Could not download the list of air conditioners. Check that this Wi-Fi network has internet, then try again.",
   };
 
   async function api(path, options = {}) {
@@ -243,12 +244,23 @@
       await api("/api/v1/wifi", { method: "PUT", body: JSON.stringify({ ssid, password: state.password }) });
       state.joined = ssid;
       state.open = null;
+      await loadSchema();
       if (!state.networks.some((n) => n.ssid === ssid)) state.networks.unshift({ ssid, rssi: -60, authmode: state.password ? 3 : 0 });
     } catch (error) {
       state.joinError = error.message;
     }
     state.busy = false;
     render();
+  }
+
+  // The list comes from the online catalog, so it can only load once Wi-Fi works.
+  async function loadSchema() {
+    try {
+      state.schema = await api("/api/v1/setup/schema");
+      state.schemaError = "";
+    } catch (error) {
+      state.schemaError = error.message;
+    }
   }
 
   async function scan() {
@@ -285,6 +297,8 @@
         options.map((o) => h("button", { class: "row", type: "button", role: "radio", "aria-checked": String(o.value === state.model), onclick: () => { state.model = o.value; render(); } },
           h("span", { class: "grow" }, h("span", { class: "name" }, o.label)),
           h("span", { class: "radio", "aria-hidden": "true" })))),
+      options.length === 0 && state.schemaError ? h("p", { class: "alert", role: "alert" }, state.schemaError) : null,
+      options.length === 0 ? h("button", { class: "btn block", type: "button", style: "height:48px;border-radius:12px", disabled: state.busy, onclick: () => run(loadSchema) }, "Load the list again") : null,
       h("p", { class: "note" }, "Unit not listed? It needs a profile first; see the project docs."),
       h("div", { style: "margin-top:24px" }, field({ id: "friendlyName", label: "Device name", ...bind("friendlyName"), extra: { maxlength: 32 } })),
       h("p", { class: "note" }, "Shown here, in Home Assistant and in Matter apps."),
@@ -423,7 +437,8 @@
 
   async function boot() {
     try {
-      [state.session, state.schema] = await Promise.all([api("/api/v1/session"), api("/api/v1/setup/schema")]);
+      state.session = await api("/api/v1/session");
+      if (state.session.wifiConfigured) await loadSchema();  // page reloaded after joining
     } catch (error) {
       state.error = error.message;
     }

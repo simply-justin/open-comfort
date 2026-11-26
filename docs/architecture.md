@@ -14,14 +14,14 @@ OpenComfort is a single ESP-IDF application in C++ for the ESP32-S3. It splits i
 ```mermaid
 flowchart TD
     Boot[Power on] --> Nvs[Init NVS and user config store]
-    Nvs --> Spiffs[Mount SPIFFS]
+    Nvs --> Spiffs[Mount SPIFFS profile cache]
     Spiffs --> Product[Read ProductDefinition]
     Product --> Reset{Reset button held?}
     Reset -->|Yes| Wipe[Factory reset and restart]
     Reset -->|No| Load[Load and migrate UserConfig]
     Load --> Valid{Valid config?}
     Valid -->|No| Portal[Captive portal] --> Restart[Save and restart]
-    Valid -->|Yes| Wifi[Connect to Wi-Fi, refresh remote catalog]
+    Valid -->|Yes| Wifi[Connect to Wi-Fi, download profile catalog]
     Wifi --> Module[ModuleFactory creates and boots module]
     Module --> Runtime[RuntimeController]
     Runtime --> Connectors[Start Web, MQTT and Matter connectors]
@@ -47,7 +47,7 @@ A failed Wi-Fi connection at boot is logged and the device keeps running, so the
 | Schedule | `main/src/Schedule/` | Timed rules and the sleep timer, SNTP and time zone |
 | Third-party | `main/src/ThirdParty/` | Nayuki `qrcodegen` (MIT), for the Matter QR code |
 | Web assets | `main/www/` | Setup and runtime portal UI and the Geist font (SIL OFL 1.1, `main/www/fonts/OFL.txt`), embedded in the app image so OTA updates include it |
-| Bundled profiles | `main/spiffs/profiles/` | `index.json` catalog and profile files |
+| Profiles | `profiles/` | Source catalog and profiles; published signed on GitHub Pages and cached in SPIFFS on the device |
 | Tests | `main/test/` | Unity tests for the runtime and connector manager |
 
 ## Runtime and connectors

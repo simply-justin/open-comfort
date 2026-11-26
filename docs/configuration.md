@@ -16,7 +16,7 @@ Set these with `idf.py menuconfig` under **OpenComfort Product**, or in an `sdkc
 | `OPENCOMFORT_RUNTIME_HTTP_PORT` | `80` | Port of the runtime portal |
 | `OPENCOMFORT_MQTT_RECONNECT_MAX_MS` | `60000` | Upper bound of the MQTT reconnect back-off |
 | `OPENCOMFORT_PORTAL_AP_PASSWORD` | `opencomfort` | WPA2 password of the setup network. Override per device in production |
-| `OPENCOMFORT_PROFILE_CATALOG_URL` | empty | Optional HTTPS URL of a remote profile catalog |
+| `OPENCOMFORT_PROFILE_CATALOG_URL` | GitHub Pages catalog of this repository | HTTPS URL of the signed profile catalog. Empty disables downloads; see [AC Profiles](profiles.md) |
 | `OPENCOMFORT_UPDATE_REPO` | `simply-justin/open-comfort` | GitHub repository whose releases provide online updates; empty turns them off |
 | `OPENCOMFORT_FACTORY_RESET_HOLD_MS` | `5000` | How long the reset button must be held |
 | `OPENCOMFORT_POWER_CYCLE_RESET_COUNT` | `5` | Quick power cycles that trigger a factory reset; 0 turns it off |

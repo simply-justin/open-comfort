@@ -46,7 +46,7 @@ For **Matter** or **Full** builds on 8 or 16 MB boards, see [Runtime API › Pro
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
-Replace `/dev/ttyUSB0` with your board's serial port. Press `Ctrl+]` to leave the monitor. The build also flashes the SPIFFS image with the portal UI and the bundled AC profile catalog.
+Replace `/dev/ttyUSB0` with your board's serial port. Press `Ctrl+]` to leave the monitor. Profiles are not flashed: the device downloads them during setup, so the Wi-Fi network needs internet access.
 
 ## 4. First-time setup
 

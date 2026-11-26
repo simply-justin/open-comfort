@@ -16,11 +16,12 @@ namespace {
 constexpr const char* kTag = "ProfileCrypto";
 
 // ECDSA P-256 public key used to verify remotely downloaded profiles.
-// Private key is held only by the signing tooling and must never be flashed.
+// The private key is the OPENCOMFORT_PROFILE_SIGNING_KEY secret of the profiles workflow;
+// it must never be flashed or committed.
 constexpr const char kProfilePublicKeyPem[] =
     "-----BEGIN PUBLIC KEY-----\n"
-    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAERo67iUjU8xn3CWurSpPrkwpzj4ci\n"
-    "z6a5MSLhUI6Na7WaP2DPK7Wwd2LMRhKkena7t/9Rs+7ppmsFJFI05UuiaA==\n"
+    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1UhmP3NgB5+6Woa/WSbsiYaobnU6\n"
+    "YcMF11K/QbCrsu3Sr5F6K9A5G0S6sG78EFzT0bhp8/CeSskNCxhhXgsMzQ==\n"
     "-----END PUBLIC KEY-----\n";
 
 int hexNibble(char c)

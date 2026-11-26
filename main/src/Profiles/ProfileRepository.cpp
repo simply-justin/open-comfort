@@ -149,16 +149,6 @@ void appendCatalogEntries(ProfileCatalog& out, const cJSON* profiles, bool remot
     }
 }
 
-const ProfileCatalogEntry* findEntry(const ProfileCatalog& catalog, const char* profileId)
-{
-    for (size_t i = 0; i < catalog.count; ++i) {
-        if (std::strcmp(catalog.entries[i].id, profileId) == 0) {
-            return &catalog.entries[i];
-        }
-    }
-    return nullptr;
-}
-
 esp_err_t parseProfileMetadata(const std::string& json, const ProfileCatalogEntry* match,
                                LoadedAcProfile& out)
 {
@@ -292,7 +282,8 @@ esp_err_t ProfileRepository::initSpiffs()
     conf.base_path = "/spiffs";
     conf.partition_label = "storage";
     conf.max_files = 8;
-    conf.format_if_mount_failed = false;
+    // Only a cache of downloaded profiles now: a blank partition is formatted on first boot.
+    conf.format_if_mount_failed = true;
 
     const esp_err_t err = esp_vfs_spiffs_register(&conf);
     if (err != ESP_OK) {
@@ -321,30 +312,27 @@ esp_err_t ProfileRepository::loadCatalog(ProfileCatalog& out)
         return err;
     }
 
-    const std::string bundled = readFile(kCatalogPath);
-    if (bundled.empty()) {
-        return ESP_ERR_NOT_FOUND;
-    }
-    cJSON* root = cJSON_Parse(bundled.c_str());
-    if (root == nullptr) {
-        return ESP_ERR_INVALID_RESPONSE;
-    }
-    const cJSON* schema = cJSON_GetObjectItem(root, "schemaVersion");
-    if (cJSON_IsNumber(schema)) {
-        out.schemaVersion = static_cast<uint16_t>(schema->valueint);
-    }
-    appendCatalogEntries(out, cJSON_GetObjectItem(root, "profiles"), false);
-    cJSON_Delete(root);
-
+    // The downloaded catalog first, so its signed profiles win over a copy that older
+    // images flashed into SPIFFS (kept as a fallback for when the device is offline).
     const std::string remote = readFile(kRemoteCatalogPath);
     if (!remote.empty()) {
-        cJSON* remoteRoot = cJSON_Parse(remote.c_str());
-        if (remoteRoot != nullptr) {
-            appendCatalogEntries(out, cJSON_GetObjectItem(remoteRoot, "profiles"), true);
-            cJSON_Delete(remoteRoot);
+        cJSON* root = cJSON_Parse(remote.c_str());
+        if (root != nullptr) {
+            const cJSON* schema = cJSON_GetObjectItem(root, "schemaVersion");
+            if (cJSON_IsNumber(schema)) out.schemaVersion = static_cast<uint16_t>(schema->valueint);
+            appendCatalogEntries(out, cJSON_GetObjectItem(root, "profiles"), true);
+            cJSON_Delete(root);
         }
     }
-    return ESP_OK;
+    const std::string bundled = readFile(kCatalogPath);
+    if (!bundled.empty()) {
+        cJSON* root = cJSON_Parse(bundled.c_str());
+        if (root != nullptr) {
+            appendCatalogEntries(out, cJSON_GetObjectItem(root, "profiles"), false);
+            cJSON_Delete(root);
+        }
+    }
+    return out.count > 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
 esp_err_t ProfileRepository::refreshRemoteCatalog(const ProductDefinition& product)
@@ -355,10 +343,15 @@ esp_err_t ProfileRepository::refreshRemoteCatalog(const ProductDefinition& produ
     if (!WiFiService::isStationConnected()) {
         return ESP_ERR_INVALID_STATE;
     }
+    esp_err_t err = initSpiffs();
+    if (err != ESP_OK) {
+        return err;
+    }
 
     std::string body;
-    esp_err_t err = HttpDownloader::getHttps(product.profileCatalogUrl, body, kMaxDownloadBytes);
+    err = HttpDownloader::getHttps(product.profileCatalogUrl, body, kMaxDownloadBytes);
     if (err != ESP_OK) {
+        ESP_LOGW(kTag, "Profile catalog download failed: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -369,57 +362,77 @@ esp_err_t ProfileRepository::refreshRemoteCatalog(const ProductDefinition& produ
     }
     cJSON_Delete(root);
 
+    if (readFile(kRemoteCatalogPath) == body) {
+        return ESP_OK;  // unchanged: spare the flash a rewrite
+    }
     if (!writeFileAtomic(kRemoteCatalogPath, body)) {
         return ESP_FAIL;
     }
-    ESP_LOGI(kTag, "Remote catalog refreshed");
+    ESP_LOGI(kTag, "Profile catalog updated");
     return ESP_OK;
 }
 
-esp_err_t ProfileRepository::loadProfile(const char* profileId, LoadedAcProfile& out)
+namespace {
+
+// Loads one catalog entry's profile: a file shipped in SPIFFS, or a signed download that
+// is fetched again when it is missing or no longer matches the catalog.
+esp_err_t loadEntry(const ProfileCatalogEntry& entry, bool allowDownload, LoadedAcProfile& out)
+{
+    char path[128] = {};
+    const bool downloaded = entry.relativePath[0] == '\0';
+    if (downloaded) {
+        downloadedPath(entry.id, path, sizeof(path));
+    } else {
+        std::snprintf(path, sizeof(path), "/spiffs/%s", entry.relativePath);
+    }
+
+    const std::string json = readFile(path);
+    esp_err_t err = json.empty() ? ESP_ERR_NOT_FOUND : ESP_OK;
+    // A downloaded file is checked against the signed catalog entry on every load.
+    if (err == ESP_OK && downloaded) err = verifyDownloadedProfile(entry, json);
+    if (err == ESP_OK) err = parseProfileMetadata(json, &entry, out);
+    if (err == ESP_OK) {
+        std::strncpy(out.localPath, path, sizeof(out.localPath) - 1);
+        return ESP_OK;
+    }
+    if (downloaded && allowDownload && entry.url[0] != '\0') {
+        ESP_LOGI(kTag, "Downloading profile %s %s", entry.id, entry.profileVersion);
+        err = downloadProfile(entry, out);
+        if (err != ESP_OK) ESP_LOGW(kTag, "Profile download failed: %s", esp_err_to_name(err));
+    }
+    return err;
+}
+
+// The first entry with this id that loads, in catalog order (downloaded catalog first).
+esp_err_t loadFirst(const char* profileId, bool allowDownload, LoadedAcProfile& out)
 {
     out = LoadedAcProfile{};
     if (profileId == nullptr || profileId[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
-
     std::unique_ptr<ProfileCatalog> catalog(new (std::nothrow) ProfileCatalog());
     if (!catalog) {
         return ESP_ERR_NO_MEM;
     }
-    esp_err_t err = loadCatalog(*catalog);
+    esp_err_t err = ProfileRepository::loadCatalog(*catalog);
     if (err != ESP_OK) {
         return err;
     }
+    err = ESP_ERR_NOT_FOUND;
+    for (size_t i = 0; i < catalog->count; ++i) {
+        if (std::strcmp(catalog->entries[i].id, profileId) != 0) continue;
+        err = loadEntry(catalog->entries[i], allowDownload, out);
+        if (err == ESP_OK) return ESP_OK;
+    }
+    out = LoadedAcProfile{};
+    return err;
+}
 
-    const ProfileCatalogEntry* match = findEntry(*catalog, profileId);
-    if (match == nullptr) {
-        return ESP_ERR_NOT_FOUND;
-    }
+}  // namespace
 
-    char path[128] = {};
-    const bool downloaded = match->relativePath[0] == '\0';
-    if (downloaded) {
-        downloadedPath(match->id, path, sizeof(path));
-    } else {
-        std::snprintf(path, sizeof(path), "/spiffs/%s", match->relativePath);
-    }
-
-    const std::string json = readFile(path);
-    if (json.empty()) {
-        return ESP_ERR_NOT_FOUND;
-    }
-    // A downloaded file is checked again on every load, against the signed catalog entry.
-    if (downloaded && verifyDownloadedProfile(*match, json) != ESP_OK) {
-        return ESP_ERR_INVALID_CRC;
-    }
-
-    err = parseProfileMetadata(json, match, out);
-    if (err != ESP_OK) {
-        return err;
-    }
-    std::strncpy(out.localPath, path, sizeof(out.localPath) - 1);
-    return ESP_OK;
+esp_err_t ProfileRepository::loadProfile(const char* profileId, LoadedAcProfile& out)
+{
+    return loadFirst(profileId, false, out);
 }
 
 esp_err_t ProfileRepository::loadProfileJson(const char* profileId, std::string& outJson)
@@ -437,34 +450,15 @@ esp_err_t ProfileRepository::ensureProfileAvailable(const ProductDefinition& pro
                                                     const char* profileId,
                                                     LoadedAcProfile& out)
 {
-    esp_err_t err = loadProfile(profileId, out);
-    if (err == ESP_OK) {
-        if (!productAllowsBus(product, out.bus)) {
-            out.valid = false;
-            return ESP_ERR_NOT_SUPPORTED;
-        }
-        return ESP_OK;
+    esp_err_t err = loadFirst(profileId, WiFiService::isStationConnected(), out);
+    if (err == ESP_ERR_NOT_FOUND && WiFiService::isStationConnected()) {
+        // Not in the catalog we have: a newer catalog may list it.
+        if (refreshRemoteCatalog(product) == ESP_OK) err = loadFirst(profileId, true, out);
     }
-
-    // Attempt remote catalog refresh + download when configured.
-    if (product.profileCatalogUrl != nullptr && product.profileCatalogUrl[0] != '\0') {
-        (void)refreshRemoteCatalog(product);
-        std::unique_ptr<ProfileCatalog> catalog(new (std::nothrow) ProfileCatalog());
-        if (catalog && loadCatalog(*catalog) == ESP_OK) {
-            const ProfileCatalogEntry* match = findEntry(*catalog, profileId);
-            if (match != nullptr && match->url[0] != '\0') {
-                err = downloadProfile(*match, out);
-                if (err == ESP_OK) {
-                    if (!productAllowsBus(product, out.bus)) {
-                        out.valid = false;
-                        return ESP_ERR_NOT_SUPPORTED;
-                    }
-                    return ESP_OK;
-                }
-            }
-        }
+    if (err == ESP_OK && !productAllowsBus(product, out.bus)) {
+        out.valid = false;
+        return ESP_ERR_NOT_SUPPORTED;
     }
-
     return err;
 }
 

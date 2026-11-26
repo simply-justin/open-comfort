@@ -9,6 +9,7 @@
 
 #include "src/Config/ConnectorSecretStore.hpp"
 #include "src/Config/UserConfigStore.hpp"
+#include "src/Profiles/ProfileRepository.hpp"
 #include "src/Setup/AcSetupProvider.hpp"
 #include "src/Setup/ISetupProvider.hpp"
 #include "src/Wifi/WiFiService.hpp"
@@ -256,6 +257,8 @@ esp_err_t handleWifiPut(httpd_req_t* req)
     g_ctx->draft.wifi = credentials;
     g_ctx->draft.wifiVerified = true;
     g_ctx->wifiConfigured = true;
+    // Profiles come from the online catalog; the next step lists them.
+    (void)ProfileRepository::refreshRemoteCatalog(*g_ctx->product);
 
     cJSON* json = cJSON_CreateObject();
     cJSON_AddBoolToObject(json, "ok", true);
@@ -266,8 +269,16 @@ esp_err_t handleSetupSchema(httpd_req_t* req)
 {
     // ~30 KB, so on the heap rather than the HTTP task stack.
     std::unique_ptr<SetupSchema> schemaStorage(new (std::nothrow) SetupSchema());
-    if (!schemaStorage || !g_ctx->setup->buildSchema(*schemaStorage)) {
+    if (!schemaStorage) {
         return sendError(req, 500, "schema_unavailable");
+    }
+    if (!g_ctx->setup->buildSchema(*schemaStorage)) {
+        // No catalog yet: fetch it once Wi-Fi is up, else the page asks to join first.
+        if (!WiFiService::isStationConnected() ||
+            ProfileRepository::refreshRemoteCatalog(*g_ctx->product) != ESP_OK ||
+            !g_ctx->setup->buildSchema(*schemaStorage)) {
+            return sendError(req, 503, "profiles_unavailable");
+        }
     }
     const SetupSchema& schema = *schemaStorage;
 

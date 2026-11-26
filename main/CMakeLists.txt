@@ -67,7 +67,6 @@ idf_component_register(
         ${OPENCOMFORT_OPTIONAL_REQUIRES}
 )
 
-spiffs_create_partition_image(storage spiffs FLASH_IN_PROJECT)
 
 # Task stacks are 4-8 KB; fail the build if a function would need more than 4 KB of stack.
 target_compile_options(${COMPONENT_LIB} PRIVATE -Werror=stack-usage=4096)

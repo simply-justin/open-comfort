@@ -1,0 +1,49 @@
+name: Profiles
+
+# Signs profiles/ and publishes the catalog on GitHub Pages, where devices download it.
+# Adding or changing a profile needs no firmware build.
+on:
+  push:
+    branches: [main]
+    paths: ["profiles/**", "scripts/build-profile-catalog.py", ".github/workflows/profiles.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sign the catalog
+        env:
+          SIGNING_KEY: ${{ secrets.OPENCOMFORT_PROFILE_SIGNING_KEY }}
+        run: |
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::Secret OPENCOMFORT_PROFILE_SIGNING_KEY is not set"
+            exit 1
+          fi
+          pip install --quiet cryptography
+          key="$RUNNER_TEMP/profile-key.pem"
+          trap 'rm -f "$key"' EXIT
+          (umask 077 && printf '%s\n' "$SIGNING_KEY" > "$key")
+          base="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/profiles"
+          python3 scripts/build-profile-catalog.py --key "$key" --base-url "$base" --out site/profiles
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

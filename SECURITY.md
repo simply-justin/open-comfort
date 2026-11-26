@@ -31,7 +31,8 @@ incorrectly can permanently lock a device.
   - HTTPS with certificate-bundle verification
   - SHA-256 integrity check
   - ECDSA P-256 signature verification with an embedded public key
-- Bundled SPIFFS profiles are trusted as part of the signed firmware image.
+- Profiles copied into SPIFFS by images before v0.2.0 are trusted as part of the
+  device; they are only used when no signed download of the same profile is available.
 
 ## Recommended production enablement order
 
@@ -83,27 +84,18 @@ python -m espsecure sign_data --version 2 --keyfile firmware-signing-key.pem \
 
 ## Profile signing
 
-Generate / rotate an ECDSA P-256 key pair for profile distribution:
+Profiles are signed by the Profiles workflow with the GitHub secret
+`OPENCOMFORT_PROFILE_SIGNING_KEY`. To create or rotate the key:
 
 ```bash
-openssl ecparam -name prime256v1 -genkey -noout -out keys/profile_signing_private.pem
-openssl ec -in keys/profile_signing_private.pem -pubout -out keys/profile_signing_public.pem
+openssl ecparam -name prime256v1 -genkey -noout -out profile-signing-key.pem
+openssl ec -in profile-signing-key.pem -pubout
+gh secret set OPENCOMFORT_PROFILE_SIGNING_KEY < profile-signing-key.pem
 ```
 
-Embed the public key in `main/src/Profiles/ProfileCrypto.cpp`.
-
-Sign a profile:
-
-```bash
-python3 scripts/sign-profile.py \
-  --key keys/profile_signing_private.pem \
-  --profile main/spiffs/profiles/mhi.json \
-  --profile-id mitsubishi_heavy_industries \
-  --version 1.0.0
-```
-
-Put `sha256`, `signature`, and `url` into the remote catalog entry. Never commit
-private signing keys.
+Embed the printed public key in `main/src/Profiles/ProfileCrypto.cpp`. A rotated key
+only works on devices running firmware with the new public key, so ship that firmware
+before the workflow signs with the new key. Keep a backup and never commit the private key.
 
 ## Factory reset / re-provisioning
 

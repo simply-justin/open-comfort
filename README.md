@@ -22,7 +22,7 @@ Every module gets these:
 - **A secure local portal** with sessions, CSRF tokens, per-client login throttling and DNS-rebinding protection.
 - **Signed firmware updates** from GitHub releases (release or pre-release channel, optional automatic install) or from a file, with automatic rollback if a new image fails to start.
 - **Hardened transports** for UART, SPI and CAN with pins fixed by the board definition.
-- **Signed, profile-driven device behaviour.** Vendor protocols are JSON profiles, not code; remote profiles are verified with SHA-256 and an ECDSA P-256 signature.
+- **Signed, downloadable device profiles.** Vendor protocols are JSON profiles, not code. They are published from this repository and downloaded by the device, so a new profile needs no firmware build; each is verified with SHA-256 and an ECDSA P-256 signature.
 - **Durable configuration** in NVS with dual-slot commits and schema migration.
 - **Schedules, logs and history** on the device, with logs that survive a crash.
 - **Factory reset** by switching the power off and on 5 times, or by holding the BOOT button.
@@ -56,7 +56,7 @@ Then join the `OpenComfort-XXXX` Wi-Fi network (password `opencomfort`) and foll
 
 | Module | What it does | Supported devices |
 |---|---|---|
-| AC bridge | Power, mode, setpoint, fan and vanes; reads room temperature and state back | Mitsubishi Heavy Industries (SRK25ZSX, SRK35ZSX, generic) over SPI, profile [`mhi.json`](main/spiffs/profiles/mhi.json) |
+| AC bridge | Power, mode, setpoint, fan and vanes; reads room temperature and state back | Mitsubishi Heavy Industries (SRK25ZSX, SRK35ZSX, generic) over SPI, profile [`mhi.json`](profiles/mhi.json) |
 
 Your air conditioner isn't listed? [Add a profile](docs/profiles.md#adding-an-air-conditioner). A new kind of device? [Add a module](docs/architecture.md#extending-the-firmware).
 
@@ -78,11 +78,11 @@ main/
 │   ├── Runtime/          Serialized state and command API
 │   └── Connectors/       Web, Home Assistant MQTT, Matter
 ├── www/                  Portal UI (embedded in the app)
-├── spiffs/               Bundled device profiles
 └── test/                 Unity tests
 matter_components/        Isolated ESP-Matter component
 test_app/                 Unity test app (runs in QEMU)
-scripts/                  Toolchain bootstrap, unit tests, profile signing
+profiles/                 AC profiles, signed and published by CI
+scripts/                  Toolchain bootstrap, unit tests, profile catalog
 ```
 
 ## Contributing
