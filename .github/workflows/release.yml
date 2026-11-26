@@ -32,6 +32,11 @@ jobs:
           - variant: full-16mb
             defaults: sdkconfig.defaults;sdkconfig.matter.defaults;sdkconfig.full.defaults
             matter: "ON"
+          # XIAO ESP32-S3 with the MHI attic wiring; the device appends "-xiao-attic".
+          - variant: full-8mb-xiao-attic
+            defaults: sdkconfig.defaults;sdkconfig.matter.defaults;sdkconfig.full.defaults;sdkconfig.8mb.defaults
+            matter: "ON"
+            board: xiao-s3-attic
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,6 +48,7 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           . "$IDF_PATH/export.sh"
           idf.py -B build -D OPENCOMFORT_MATTER=${{ matrix.matter }} \
+            -D OPENCOMFORT_MHI_BOARD=${{ matrix.board || 'rev-a' }} \
             -D SDKCONFIG=build/sdkconfig -D SDKCONFIG_DEFAULTS="${{ matrix.defaults }}" build
 
       - name: Check the version matches the tag
