@@ -165,17 +165,20 @@ void UpdateService::checkTask(void* arg)
         std::lock_guard<std::mutex> lock(self->mutex_);
         prerelease = self->status_.prerelease;
     }
-    // "latest" never returns pre-releases; the list does, newest first. Three keep the JSON
-    // (~9 KB per release with six assets) well under kMaxReleaseJson and the cJSON tree small.
+    // "latest" never returns pre-releases; the list does, newest first. A release with six
+    // assets is ~12 KB of JSON (each asset repeats its uploader), so two releases leave
+    // kMaxReleaseJson room for more assets, and the second covers a newest one without our build.
     char url[160];
     std::snprintf(url, sizeof(url),
-                  prerelease ? "https://api.github.com/repos/%s/releases?per_page=3"
+                  prerelease ? "https://api.github.com/repos/%s/releases?per_page=2"
                              : "https://api.github.com/repos/%s/releases/latest",
                   CONFIG_OPENCOMFORT_UPDATE_REPO);
     std::string body;
     const esp_err_t err = HttpDownloader::getHttps(url, body, kMaxReleaseJson);
     if (err != ESP_OK) {
-        self->fail(err == ESP_ERR_INVALID_RESPONSE ? "no_release_found" : "network_error");
+        self->fail(err == ESP_ERR_INVALID_RESPONSE ? "no_release_found"
+                   : err == ESP_ERR_INVALID_SIZE   ? "release_data_too_large"
+                                                   : "network_error");
         vTaskDelete(nullptr);
         return;
     }

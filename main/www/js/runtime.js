@@ -90,6 +90,7 @@
     firmware_upload_interrupted: "The upload stopped. Try again.",
     network_error: "Could not reach GitHub. Check the internet connection.",
     no_release_found: "No release found yet.",
+    release_data_too_large: "GitHub sent more release data than this device can read. Install the new version from a file.",
     no_build_for_this_device: "The newest release has no build for this device.",
     bad_release_data: "GitHub sent something unexpected. Try again later.",
     download_failed: "The download did not start.",
