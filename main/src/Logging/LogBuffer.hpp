@@ -29,6 +29,9 @@ public:
     // `dropped` when older lines than `since` were overwritten before they were read.
     static size_t read(uint32_t since, LogEntry* out, size_t capacity, bool& dropped);
     static uint32_t lastSeq();
+    // Seq of the first line of this boot. Lower seqs were kept from before a restart
+    // (crash, watchdog, update), so the portal can show what led up to it.
+    static uint32_t bootSeq();
     static void setDebug(bool debug);
     static bool debug();
 };

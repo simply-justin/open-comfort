@@ -4,9 +4,11 @@
 #include <climits>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <memory>
 #include <new>
 #include <string>
+#include <strings.h>
 
 #include "sdkconfig.h"
 
@@ -35,6 +37,7 @@ extern "C" {
 #include "esp_random.h"
 #include "esp_system.h"
 #include "freertos/task.h"
+#include "lwip/sockets.h"
 #include "mdns.h"
 }
 
@@ -110,8 +113,56 @@ std::string readBody(httpd_req_t* request)
     return body;
 }
 
+// A short hash of the peer address; 0 when unknown. Keys the per-client login throttle.
+uint32_t clientId(httpd_req_t* request)
+{
+    sockaddr_storage address{};
+    socklen_t length = sizeof(address);
+    const int fd = httpd_req_to_sockfd(request);
+    if (fd < 0 || getpeername(fd, reinterpret_cast<sockaddr*>(&address), &length) != 0) return 0;
+    const uint8_t* bytes = nullptr;
+    size_t count = 0;
+    if (address.ss_family == AF_INET) {
+        const auto* v4 = reinterpret_cast<const sockaddr_in*>(&address);
+        bytes = reinterpret_cast<const uint8_t*>(&v4->sin_addr);
+        count = sizeof(v4->sin_addr);
+#if CONFIG_LWIP_IPV6
+    } else if (address.ss_family == AF_INET6) {
+        const auto* v6 = reinterpret_cast<const sockaddr_in6*>(&address);
+        bytes = reinterpret_cast<const uint8_t*>(&v6->sin6_addr);
+        count = sizeof(v6->sin6_addr);
+#endif
+    }
+    uint32_t hash = 2166136261u;  // FNV-1a
+    for (size_t i = 0; i < count; ++i) hash = (hash ^ bytes[i]) * 16777619u;
+    return hash == 0 ? 1 : hash;
+}
+
+// Blocks DNS rebinding: a page on another domain that resolves to this device gets its own
+// Host header, so only the device name (also with a network suffix) and IP literals pass.
+// shortcut: a DNS alias with another name (e.g. airco.lan) is refused; add an allow-list
+// setting if someone needs one.
+bool hostAllowed(httpd_req_t* request)
+{
+    char host[96] = {};
+    const size_t length = httpd_req_get_hdr_value_len(request, "Host");
+    if (length == 0) return true;  // no Host header: not a browser
+    if (length >= sizeof(host) || httpd_req_get_hdr_value_str(request, "Host", host, sizeof(host)) != ESP_OK) {
+        return false;
+    }
+    if (host[0] == '[') return true;  // IPv6 literal
+    if (char* colon = std::strchr(host, ':')) *colon = '\0';
+    if (host[std::strspn(host, "0123456789.")] == '\0') return true;  // IPv4 literal
+    char name[kMaxHostnameLen + 1];
+    if (resolveDeviceHostname(self(request)->config(), name, sizeof(name)) != ESP_OK) return false;
+    const size_t nameLength = std::strlen(name);
+    return strncasecmp(host, name, nameLength) == 0 &&
+           (host[nameLength] == '\0' || host[nameLength] == '.');
+}
+
 esp_err_t requireAuth(httpd_req_t* request, bool csrf)
 {
+    if (!hostAllowed(request)) return sendError(request, 400, "host_not_allowed");
     if (!self(request)->isAuthorized(request, csrf)) {
         return sendError(request, csrf ? 403 : 401, csrf ? "csrf_invalid" : "unauthorized");
     }
@@ -199,6 +250,7 @@ esp_err_t handleSession(httpd_req_t* request)
 
 esp_err_t handleLogin(httpd_req_t* request)
 {
+    if (!hostAllowed(request)) return sendError(request, 400, "host_not_allowed");
     const std::string body = readBody(request);
     cJSON* root = cJSON_Parse(body.c_str());
     if (root == nullptr) {
@@ -206,13 +258,16 @@ esp_err_t handleLogin(httpd_req_t* request)
     }
     const cJSON* password = cJSON_GetObjectItem(root, "password");
     const bool remember = cJSON_IsTrue(cJSON_GetObjectItem(root, "remember"));
+    RuntimeHttpConnector::PasswordCheck check = RuntimeHttpConnector::PasswordCheck::Wrong;
     const RuntimeHttpConnector::Session* session =
         (cJSON_IsString(password) && password->valuestring != nullptr)
-            ? self(request)->authenticate(password->valuestring, remember)
+            ? self(request)->authenticate(password->valuestring, remember, clientId(request), &check)
             : nullptr;
     cJSON_Delete(root);
     if (session == nullptr) {
-        return sendError(request, 401, "invalid_credentials");
+        return check == RuntimeHttpConnector::PasswordCheck::Throttled
+                   ? sendError(request, 429, "too_many_attempts")
+                   : sendError(request, 401, "invalid_credentials");
     }
 
     // Must outlive httpd_resp_send, which reads the header pointer.
@@ -427,6 +482,19 @@ esp_err_t handleConnectorsPut(httpd_req_t* request)
         if (length < 8 || length > 64) {
             cJSON_Delete(root);
             return sendError(request, 400, "invalid_admin_password");
+        }
+        // A session left open on someone else's screen must not be enough to take over.
+        // 400, not 403: the page treats 403 as signed out.
+        const cJSON* current = cJSON_GetObjectItem(root, "currentPassword");
+        const RuntimeHttpConnector::PasswordCheck check =
+            cJSON_IsString(current)
+                ? self(request)->checkPassword(current->valuestring, clientId(request))
+                : RuntimeHttpConnector::PasswordCheck::Wrong;
+        if (check != RuntimeHttpConnector::PasswordCheck::Ok) {
+            cJSON_Delete(root);
+            return check == RuntimeHttpConnector::PasswordCheck::Throttled
+                       ? sendError(request, 429, "too_many_attempts")
+                       : sendError(request, 400, "wrong_current_password");
         }
     }
 
@@ -678,6 +746,14 @@ esp_err_t handleStatus(httpd_req_t* request)
         connector->product().board != nullptr) {
         cJSON_AddNumberToObject(ac, "clockBursts", mhi::observedClockBursts());
         cJSON_AddNumberToObject(ac, "sckPin", mhi::activeSckPin());
+        cJSON* probe = cJSON_AddArrayToObject(ac, "clockProbe");
+        for (size_t i = 0; i < kMhiWiringCount; ++i) {
+            cJSON* item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "wiring", connector->product().board->mhiWirings[i].name);
+            cJSON_AddNumberToObject(item, "pin", connector->product().board->mhiWirings[i].pins.sckPin);
+            cJSON_AddNumberToObject(item, "edges", mhi::probedEdges(i));
+            cJSON_AddItemToArray(probe, item);
+        }
     }
     cJSON_AddBoolToObject(ac, "answering", snapshot.reported.valid);
     cJSON_AddNumberToObject(ac, "lastRequestId", snapshot.lastRequestId);
@@ -811,7 +887,11 @@ esp_err_t handleSchedulePut(httpd_req_t* request)
             rule.action = std::strcmp(action->valuestring, "off") == 0 ? ScheduleAction::TurnOff
                                                                        : ScheduleAction::TurnOn;
             if (cJSON_IsString(mode)) valid = parseMode(mode->valuestring, rule.mode);
-            if (cJSON_IsNumber(target)) rule.targetTempC = static_cast<int8_t>(target->valueint);
+            if (cJSON_IsNumber(target)) {
+                // Range-check before the int8 cast, or 266 would wrap to a valid 10.
+                valid = valid && target->valueint >= 10 && target->valueint <= 35;
+                rule.targetTempC = static_cast<int8_t>(target->valueint);
+            }
             config.rules[config.ruleCount++] = rule;
         }
     }
@@ -986,9 +1066,9 @@ esp_err_t handleLogsGet(httpd_req_t* request)
     const uint32_t next = count ? entries[count - 1].seq : (since > last ? last : since);
     char head[200];
     std::snprintf(head, sizeof(head),
-                  "{\"next\":%lu,\"last\":%lu,\"dropped\":%s,\"nowMs\":%lu,\"epoch\":%s,\"level\":\"%s\",\"lines\":[",
+                  "{\"next\":%lu,\"last\":%lu,\"bootSeq\":%lu,\"dropped\":%s,\"nowMs\":%lu,\"epoch\":%s,\"level\":\"%s\",\"lines\":[",
                   static_cast<unsigned long>(next), static_cast<unsigned long>(last),
-                  dropped ? "true" : "false", static_cast<unsigned long>(esp_log_timestamp()), epoch,
+                  static_cast<unsigned long>(LogBuffer::bootSeq()), dropped ? "true" : "false", static_cast<unsigned long>(esp_log_timestamp()), epoch,
                   LogBuffer::debug() ? "debug" : "normal");
     body += head;
     for (size_t i = 0; i < count; ++i) {
@@ -1258,27 +1338,55 @@ bool constantTimeEquals(const char* a, const char* b, size_t length)
     return difference == 0;
 }
 
+int64_t wallClock()
+{
+    return ScheduleService::instance().timeValid() ? static_cast<int64_t>(std::time(nullptr)) : 0;
+}
+
 bool expired(const RuntimeHttpConnector::Session& session, TickType_t now)
 {
-    return session.token[0] == '\0' ||
-           (!session.remembered && static_cast<int32_t>(now - session.expiresAt) >= 0);
+    if (session.token[0] == '\0') return true;
+    if (!session.remembered) return static_cast<int32_t>(now - session.expiresAt) >= 0;
+    // Remembered sign-ins outlive restarts, so they age by the wall clock once it is known.
+    const int64_t clock = wallClock();
+    return session.createdEpoch != 0 && clock != 0 &&
+           clock - session.createdEpoch > RuntimeHttpConnector::kRememberDays * 24 * 60 * 60;
 }
 }  // namespace
 
-const RuntimeHttpConnector::Session* RuntimeHttpConnector::authenticate(const char* password, bool remember)
+RuntimeHttpConnector::PasswordCheck RuntimeHttpConnector::checkPassword(const char* password,
+                                                                        uint32_t client)
 {
     const TickType_t now = xTaskGetTickCount();
-    if (static_cast<int32_t>(now - nextLoginAllowedAt_) < 0) {
-        return nullptr;
+    // This client's slot, else the one with the fewest failures (a new client takes it over).
+    LoginThrottle* throttle = &throttles_[0];
+    for (LoginThrottle& candidate : throttles_) {
+        if (candidate.client == client) {
+            throttle = &candidate;
+            break;
+        }
+        if (candidate.failures < throttle->failures) throttle = &candidate;
+    }
+    if (throttle->client != client) *throttle = LoginThrottle{client, now, 0};
+    if (throttle->failures > 0 && static_cast<int32_t>(now - throttle->nextAllowedAt) < 0) {
+        return PasswordCheck::Throttled;
     }
     if (!ConnectorSecretStore::verifyAdminPassword(password)) {
-        failedLoginAttempts_++;
-        nextLoginAllowedAt_ = now + (failedLoginAttempts_ >= 5 ? kLoginLockout : kLoginDelay);
-        return nullptr;
+        if (throttle->failures < UINT8_MAX) throttle->failures++;
+        throttle->nextAllowedAt = now + (throttle->failures >= 5 ? kLoginLockout : kLoginDelay);
+        return PasswordCheck::Wrong;
     }
+    *throttle = LoginThrottle{};
+    return PasswordCheck::Ok;
+}
 
-    failedLoginAttempts_ = 0;
-    nextLoginAllowedAt_ = 0;
+const RuntimeHttpConnector::Session* RuntimeHttpConnector::authenticate(
+    const char* password, bool remember, uint32_t client, PasswordCheck* result)
+{
+    const PasswordCheck check = checkPassword(password, client);
+    if (result != nullptr) *result = check;
+    if (check != PasswordCheck::Ok) return nullptr;
+    const TickType_t now = xTaskGetTickCount();
     // Reuse a free or expired slot, otherwise replace the short session that expires
     // first; only when every slot is remembered does the first remembered one go.
     Session* slot = nullptr;
@@ -1298,6 +1406,7 @@ const RuntimeHttpConnector::Session* RuntimeHttpConnector::authenticate(const ch
     randomHex(slot->csrf, 16);
     slot->expiresAt = now + kSessionDuration;
     slot->remembered = remember;
+    slot->createdEpoch = wallClock();
     if (remember || replacedRemembered) saveRememberedSessions();
     return slot;
 }
@@ -1332,6 +1441,10 @@ RuntimeHttpConnector::Session* RuntimeHttpConnector::findSession(httpd_req_t* re
     const TickType_t now = xTaskGetTickCount();
     for (Session& session : sessions_) {
         if (!expired(session, now) && constantTimeEquals(session.token, value, 32)) {
+            // Signed in before SNTP set the clock: start its 90 days now.
+            if (session.remembered && session.createdEpoch == 0 && (session.createdEpoch = wallClock()) != 0) {
+                saveRememberedSessions();
+            }
             return &session;
         }
     }

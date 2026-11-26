@@ -61,6 +61,7 @@ esp_err_t sendWebAsset(httpd_req_t* request, WebAsset asset)
     const char* etag = buildEtag();
     httpd_resp_set_hdr(request, "Cache-Control", "no-cache");
     httpd_resp_set_hdr(request, "ETag", etag);
+    httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");  // no clickjacking from other sites
 
     char ifNoneMatch[24] = {};
     if (httpd_req_get_hdr_value_str(request, "If-None-Match", ifNoneMatch, sizeof(ifNoneMatch)) ==

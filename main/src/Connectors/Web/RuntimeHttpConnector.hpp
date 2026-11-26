@@ -31,11 +31,17 @@ public:
         char token[33] = {};  // cookie value (HttpOnly)
         char csrf[33] = {};   // returned to the page, sent back in X-OC-CSRF
         TickType_t expiresAt = 0;
-        bool remembered = false;  // kept across restarts until sign-out or a password change
+        bool remembered = false;  // kept across restarts, for kRememberDays
+        int64_t createdEpoch = 0;  // wall clock at sign-in; 0 until SNTP has set the clock
     };
+    static constexpr int64_t kRememberDays = 90;
 
+    enum class PasswordCheck : uint8_t { Ok, Wrong, Throttled };
+    // Checks the admin password, slowing down repeated failures from the same client.
+    PasswordCheck checkPassword(const char* password, uint32_t client);
     // Returns the new session, or nullptr when the password is wrong or login is throttled.
-    const Session* authenticate(const char* password, bool remember);
+    const Session* authenticate(const char* password, bool remember, uint32_t client,
+                                PasswordCheck* result = nullptr);
     bool isAuthorized(httpd_req_t* request, bool requireCsrf) const;
     void logout(httpd_req_t* request);
     // The 32-character oc_session value from a Cookie header, or nullptr. Exposed for tests.
@@ -66,8 +72,14 @@ private:
     // A few concurrent sign-ins (phone, laptop, tablet); the oldest is replaced when full.
     static constexpr size_t kMaxSessions = 6;
     mutable Session sessions_[kMaxSessions] = {};
-    TickType_t nextLoginAllowedAt_ = 0;
-    uint8_t failedLoginAttempts_ = 0;
+    // Failed sign-ins per client address, so one client cannot lock out the others.
+    struct LoginThrottle {
+        uint32_t client = 0;
+        TickType_t nextAllowedAt = 0;
+        uint8_t failures = 0;
+    };
+    static constexpr size_t kThrottleSlots = 8;
+    LoginThrottle throttles_[kThrottleSlots] = {};
     TickType_t restartAt_ = 0;
     const ConnectorManager* connectorManager_ = nullptr;
     // Written by tick() on the main loop, read by the HTTP task; a torn read only

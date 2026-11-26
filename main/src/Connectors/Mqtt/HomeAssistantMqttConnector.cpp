@@ -1,5 +1,6 @@
 #include "src/Connectors/Mqtt/HomeAssistantMqttConnector.hpp"
 
+#include "src/Config/DeviceHostname.hpp"
 #include "src/Schedule/ScheduleService.hpp"
 #include "src/Update/UpdateService.hpp"
 
@@ -197,6 +198,7 @@ void HomeAssistantMqttConnector::stop()
     }
     status_.state = ConnectorState::Stopped;
     reconnectAt_ = 0;
+    pendingEvent_ = Event::None;  // an event from the old client must not touch a new one
 }
 
 esp_err_t HomeAssistantMqttConnector::reconfigure(const UserConfig& config)
@@ -211,6 +213,25 @@ void HomeAssistantMqttConnector::tick()
         return;
     }
     const TickType_t now = xTaskGetTickCount();
+    switch (pendingEvent_.exchange(Event::None)) {
+        case Event::Connected:
+            onConnected();
+            break;
+        case Event::Disconnected:
+            status_.state = ConnectorState::Degraded;
+            status_.lastError = ESP_ERR_INVALID_STATE;
+            reconnectAt_ = now + pdMS_TO_TICKS(reconnectDelayMs_);
+            break;
+        case Event::None:
+            break;
+    }
+    if (clientError_.exchange(false)) status_.lastError = ESP_FAIL;
+    if (status_.state == ConnectorState::Running && republish_.exchange(false)) {
+        publishDiscovery();
+        publishState(true);
+        publishExtras();
+    }
+    if (extrasDue_.exchange(false)) nextExtrasAt_ = now;
     if (status_.state == ConnectorState::Degraded && reconnectAt_ != 0 &&
         static_cast<int32_t>(now - reconnectAt_) >= 0) {
         const esp_err_t err = esp_mqtt_client_reconnect(client_);
@@ -248,18 +269,16 @@ void HomeAssistantMqttConnector::onEvent(esp_mqtt_event_handle_t event)
 {
     switch (static_cast<esp_mqtt_event_id_t>(event->event_id)) {
         case MQTT_EVENT_CONNECTED:
-            onConnected();
+            pendingEvent_ = Event::Connected;
             break;
         case MQTT_EVENT_DISCONNECTED:
-            status_.state = ConnectorState::Degraded;
-            status_.lastError = ESP_ERR_INVALID_STATE;
-            reconnectAt_ = xTaskGetTickCount() + pdMS_TO_TICKS(reconnectDelayMs_);
+            pendingEvent_ = Event::Disconnected;
             break;
         case MQTT_EVENT_DATA:
             onData(event->topic, event->topic_len, event->data, event->data_len);
             break;
         case MQTT_EVENT_ERROR:
-            status_.lastError = ESP_FAIL;
+            clientError_ = true;
             break;
         default:
             break;
@@ -296,25 +315,21 @@ void HomeAssistantMqttConnector::onData(const char* topic, int topicLength, cons
 
     if (static_cast<size_t>(topicLength) == std::strlen(haStatusTopic_) &&
         std::strncmp(topic, haStatusTopic_, static_cast<size_t>(topicLength)) == 0) {
-        if (std::strcmp(value, "online") == 0) {
-            publishDiscovery();
-            publishState(true);
-            publishExtras();
-        }
+        if (std::strcmp(value, "online") == 0) republish_ = true;
         return;
     }
     if (topicIs(topic, topicLength, baseTopic_, "sleep/set")) {
         for (const SleepOption& option : kSleepOptions) {
             if (std::strcmp(value, option.label) == 0) {
                 ScheduleService::instance().setSleepMinutes(option.minutes);
-                nextExtrasAt_ = 0;  // show the new choice right away
+                extrasDue_ = true;  // show the new choice right away
             }
         }
         return;
     }
     if (topicIs(topic, topicLength, baseTopic_, "update/install")) {
         if (std::strcmp(value, "install") == 0) (void)UpdateService::instance().installNow();
-        nextExtrasAt_ = 0;
+        extrasDue_ = true;
         return;
     }
 
@@ -384,10 +399,10 @@ void HomeAssistantMqttConnector::publishDiscovery()
 {
     const RuntimeSnapshot snapshot = runtime_.snapshot();
     char id[72];
-    uint8_t mac[6] = {};
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    char url[48];
-    std::snprintf(url, sizeof(url), "http://opencomfort-%02x%02x.local/", mac[4], mac[5]);
+    char hostname[kMaxHostnameLen + 1] = "opencomfort";
+    (void)resolveDeviceHostname(config_, hostname, sizeof(hostname));
+    char url[kMaxHostnameLen + 16];
+    std::snprintf(url, sizeof(url), "http://%s.local/", hostname);
 
     // Climate: power, mode, whole-degree setpoint, fan and the room temperature.
     cJSON* climate = cJSON_CreateObject();

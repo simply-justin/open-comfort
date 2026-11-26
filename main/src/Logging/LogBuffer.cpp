@@ -6,15 +6,24 @@
 #include <cstring>
 
 extern "C" {
+#include "esp_attr.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 }
 
 namespace opencomfort {
 namespace {
 
-LogEntry s_entries[kLogEntries];
-uint32_t s_nextSeq = 1;
+// Not cleared at a software reset or crash, so the lines before it survive. The magic
+// includes the layout, so a firmware with a different layout starts empty.
+constexpr uint32_t kMagic = 0x4f434c00u ^ (sizeof(LogEntry) << 8) ^ kLogEntries;
+// Raw bytes: a noinit section cannot hold LogEntry's default values.
+__NOINIT_ATTR alignas(LogEntry) uint8_t s_storage[sizeof(LogEntry) * kLogEntries];
+LogEntry* const s_entries = reinterpret_cast<LogEntry*>(s_storage);
+__NOINIT_ATTR uint32_t s_nextSeq;
+__NOINIT_ATTR uint32_t s_magic;
+uint32_t s_bootSeq = 1;
 portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 vprintf_like_t s_serial = nullptr;
 bool s_debug = false;
@@ -78,7 +87,17 @@ bool parseLogLine(const char* line, LogEntry& out)
 
 void LogBuffer::install()
 {
-    if (s_serial == nullptr) s_serial = esp_log_set_vprintf(capture);
+    if (s_serial != nullptr) return;
+    const esp_reset_reason_t reason = esp_reset_reason();
+    const bool kept = s_magic == kMagic && s_nextSeq >= 1 && s_nextSeq < 0x80000000u &&
+                      reason != ESP_RST_POWERON && reason != ESP_RST_BROWNOUT;
+    if (!kept) {
+        std::memset(s_storage, 0, sizeof(s_storage));
+        s_nextSeq = 1;
+        s_magic = kMagic;
+    }
+    s_bootSeq = s_nextSeq;
+    s_serial = esp_log_set_vprintf(capture);
 }
 
 size_t LogBuffer::read(uint32_t since, LogEntry* out, size_t capacity, bool& dropped)
@@ -95,6 +114,11 @@ size_t LogBuffer::read(uint32_t since, LogEntry* out, size_t capacity, bool& dro
     }
     portEXIT_CRITICAL(&s_lock);
     return count;
+}
+
+uint32_t LogBuffer::bootSeq()
+{
+    return s_bootSeq;
 }
 
 uint32_t LogBuffer::lastSeq()

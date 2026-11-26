@@ -106,13 +106,16 @@ All runtime endpoints are under `/api/v1`.
 - `POST /auth/login` with `{"password": "...", "remember": true|false}` creates a session
   (up to six at once) and sets the `HttpOnly` session cookie. A normal session lasts one hour
   and ends at a restart. With `remember` it is stored in NVS (`oc_secrets`), the cookie lasts a
-  year, and it ends only at sign-out, a password change or a factory reset. When all slots are
+  year, and it ends at sign-out, a password change, a factory reset or 90 days after sign-in
+  (counted by the SNTP clock). When all slots are
   taken, the short session that expires first is replaced. Mutating requests require the
   returned `csrfToken`, which differs from the cookie, in `X-OC-CSRF`.
 - `GET /device` reports identity, `firmwareVersion` and build capabilities, including `ota`.
 - `GET /state` reports desired/reported state, revision, and limits.
 - `PUT /state` queues a state command and returns `202` with a request ID.
-- `GET|PUT /connectors` reads redacted settings or stages replacements. A PUT with
+- `GET|PUT /connectors` reads redacted settings or stages replacements. A new
+  `adminPassword` needs the current one in `currentPassword` (`400 wrong_current_password`
+  otherwise). A PUT with
   `{"hostname":"airco-woonkamer"}` selects `airco-woonkamer.local` after restart.
   An empty string restores the default. `GET /device` returns the resolved DNS label
   in `hostname` and the saved override in `hostnameOverride`.
@@ -133,11 +136,34 @@ All runtime endpoints are under `/api/v1`.
   `POST /update/check` starts a check against GitHub releases; `POST /update/install`
   downloads the available version over HTTPS into the inactive slot and restarts.
 - `POST /firmware` takes a raw `OpenComfort.bin` body, writes it to the inactive OTA
-  slot and schedules a reboot. Images from another project or chip are rejected.
+  slot and schedules a reboot. Images from another project or chip are rejected, and so
+  are images not signed with the release key (see "Firmware signing" below).
 
 Passwords are never returned by an API. Request bodies are bounded to 2 KiB,
-login failures are rate-limited, sessions expire after one hour, and runtime
-logs must not contain credentials or session tokens.
+login failures are slowed per client address (1 s after a failure, 30 s after five;
+`429 too_many_attempts`), sessions expire after one hour, and runtime logs must not
+contain credentials or session tokens.
+
+API requests must carry a `Host` header that is the device's IP address, its hostname or
+the hostname with a suffix (`airco.local`, `airco.fritz.box`); anything else gets
+`400 host_not_allowed`. This blocks DNS rebinding from websites. Pages are served with
+`X-Frame-Options: DENY`, so other sites cannot frame the portal.
+
+The portal is plain HTTP: on the local network the password and session cookie are not
+encrypted. Use it on a network you trust, or reach it through a VPN.
+
+## Firmware signing
+
+Release images are signed (Secure Boot V2 RSA-3072 signature block, without hardware
+Secure Boot: `CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT`). A running OpenComfort only accepts
+an update, online or uploaded, that is signed with the same key as itself. The release
+workflow signs every image with the `OPENCOMFORT_SIGNING_KEY` secret and refuses to publish
+without it.
+
+Local `idf.py build` images are not signed. Flash them over USB. A device running an
+unsigned build cannot install updates; flash a signed release over USB to restore that.
+Firmware up to v0.2.0-beta.4 does not check signatures and installs signed images normally.
+Losing the key means devices can only be updated over USB.
 
 ## Home Assistant MQTT
 

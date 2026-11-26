@@ -165,10 +165,11 @@ void UpdateService::checkTask(void* arg)
         std::lock_guard<std::mutex> lock(self->mutex_);
         prerelease = self->status_.prerelease;
     }
-    // "latest" never returns pre-releases; the list does, newest first.
+    // "latest" never returns pre-releases; the list does, newest first. Three keep the JSON
+    // (~9 KB per release with six assets) well under kMaxReleaseJson and the cJSON tree small.
     char url[160];
     std::snprintf(url, sizeof(url),
-                  prerelease ? "https://api.github.com/repos/%s/releases?per_page=5"
+                  prerelease ? "https://api.github.com/repos/%s/releases?per_page=3"
                              : "https://api.github.com/repos/%s/releases/latest",
                   CONFIG_OPENCOMFORT_UPDATE_REPO);
     std::string body;

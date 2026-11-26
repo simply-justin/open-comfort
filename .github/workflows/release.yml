@@ -52,14 +52,32 @@ jobs:
           echo "Firmware version: $version"
           test "$version" = "$GITHUB_REF_NAME"
 
+      # Devices only install images signed with the key of the firmware they run.
+      - name: Sign the image
+        shell: bash
+        env:
+          SIGNING_KEY: ${{ secrets.OPENCOMFORT_SIGNING_KEY }}
+        run: |
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::Secret OPENCOMFORT_SIGNING_KEY is not set; refusing to publish unsigned firmware"
+            exit 1
+          fi
+          . "$IDF_PATH/export.sh"
+          key="$RUNNER_TEMP/signing-key.pem"
+          trap 'rm -f "$key"' EXIT
+          (umask 077 && printf '%s\n' "$SIGNING_KEY" > "$key")
+          python -m espsecure sign_data --version 2 --keyfile "$key" \
+            --output build/OpenComfort.signed.bin build/OpenComfort.bin
+          python -m espsecure verify_signature --version 2 --keyfile "$key" build/OpenComfort.signed.bin
+
       - name: Name the image
         shell: bash
         run: |
-          cp build/OpenComfort.bin opencomfort-${{ matrix.variant }}.bin
+          cp build/OpenComfort.signed.bin opencomfort-${{ matrix.variant }}.bin
           # Builds up to v0.2.0-beta.3 for the XIAO attic board look for this name; the
           # image is the same, as the board is now detected at boot.
           if [ "${{ matrix.variant }}" = full-8mb ]; then
-            cp build/OpenComfort.bin opencomfort-full-8mb-xiao-attic.bin
+            cp build/OpenComfort.signed.bin opencomfort-full-8mb-xiao-attic.bin
           fi
 
       - uses: actions/upload-artifact@v4

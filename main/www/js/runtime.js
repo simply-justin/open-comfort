@@ -71,6 +71,9 @@
 
   const MESSAGES = {
     invalid_credentials: "That password is not right.",
+    wrong_current_password: "The current password is not right.",
+    too_many_attempts: "Too many wrong passwords. Wait 30 seconds and try again.",
+    host_not_allowed: "Open this page through the device name (name.local) or its IP address.",
     invalid_admin_password: "Use 8 to 64 characters for the portal password.",
     invalid_connector_config: "Check the MQTT broker and port.",
     invalid_hostname: "Use 1–32 letters, numbers or hyphens, without a hyphen at either end. Leave empty for the automatic name.",
@@ -274,6 +277,8 @@
   function signedOut() {
     ui.csrf = "";
     store.set(CSRF_KEY, "");
+    // A restart (update, settings) may have brought a new UI with the new firmware.
+    if (ui.view !== "login") { location.reload(); return; }
     ui.device = null;
     Object.values(ui.timers).forEach((t) => { clearInterval(t); clearTimeout(t); });
     ui.view = "login";
@@ -673,7 +678,9 @@
     const signalWord = rssi === undefined ? "" : rssi >= -60 ? "good" : rssi >= -72 ? "fair" : "weak";
     const issues = [];
     if (!st.ac.answering) {
-      if (st.ac.clockBursts === 0) issues.push(`No AC clock bursts detected on GPIO${st.ac.sckPin} since startup.`);
+      const probe = (st.ac.clockProbe || []).filter((p) => p.edges >= 0).map((p) => `GPIO${p.pin}: ${p.edges}`).join(", ");
+      if (st.ac.clockBursts === 0) issues.push(`No AC clock bursts detected on GPIO${st.ac.sckPin} since startup.` +
+        (probe ? ` Pulses at startup: ${probe}. With 0 on every pin no clock reaches the board: check the cable and that the indoor unit has power.` : ""));
       else if (st.ac.clockBursts > 0) issues.push(`Detected ${st.ac.clockBursts} clock bursts since startup. No current valid AC frame.`);
       else issues.push("The air conditioner is not answering.");
     }
@@ -713,7 +720,7 @@
   function openSettings() {
     const c = ui.connectors;
     ui.form = {
-      friendlyName: ui.device.friendlyName, adminPassword: "", wifiSsid: "", wifiPassword: "",
+      friendlyName: ui.device.friendlyName, adminPassword: "", currentPassword: "", wifiSsid: "", wifiPassword: "",
       hostname: ui.device.hostnameOverride || "",
       mqttEnabled: c.mqttEnabled, mqttHost: c.mqttHost || "homeassistant.local", mqttPort: c.mqttPort, mqttTls: c.mqttTls,
       mqttUsername: "", mqttPassword: "", matterEnabled: c.matterEnabled, integration: null,
@@ -760,8 +767,9 @@
               saveBtn("Save and restart", () => ({ hostname: f.hostname.trim() })),
             ]),
             settingsRow("password", P.lock, "", "Portal password", "Change", () => [
+              formField("currentPassword", "Current password", { type: "password", maxlength: 64, autocomplete: "current-password" }),
               formField("adminPassword", "New password · at least 8 characters", { type: "password", minlength: 8, maxlength: 64, autocomplete: "new-password" }),
-              saveBtn("Save and restart", () => ({ adminPassword: f.adminPassword })),
+              saveBtn("Save and restart", () => ({ adminPassword: f.adminPassword, currentPassword: f.currentPassword })),
             ]),
             settingsRow("wifi", P.wifi, "", "Wi‑Fi", ui.status?.wifi?.ssid || "Change", () => [
               formField("wifiSsid", "Network name", { maxlength: 32, autocomplete: "off" }),
@@ -1122,7 +1130,7 @@
     if (!log) return false;
     try {
       const data = await api(`/api/v1/logs?since=${log.next}`);
-      Object.assign(log, { next: data.next, level: data.level, epoch: data.epoch, nowMs: data.nowMs, last: data.last });
+      Object.assign(log, { next: data.next, level: data.level, epoch: data.epoch, nowMs: data.nowMs, last: data.last, bootSeq: data.bootSeq });
       log.lines = log.lines.concat(data.lines).slice(-300);
       ui.error = "";
       return data.lines.length > 0 && data.next < data.last;
@@ -1139,6 +1147,7 @@
   }
 
   function logTime(log, line) {
+    if (line.seq < (log.bootSeq || 0)) return "earlier";  // before the last restart
     if (log.epoch !== null) {
       const at = new Date(log.epoch * 1000 - (log.nowMs - line.ms));
       return at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
@@ -1192,7 +1201,8 @@
         h("section", { class: "card log-card", "aria-label": "Log" },
           h("p", { class: "log-status" },
             h("span", { class: log.paused ? "log-dot" : "log-dot live", "aria-hidden": "true" }),
-            `${log.paused ? "Paused" : "Live"} · ${log.lines.length} lines since the last restart`),
+            `${log.paused ? "Paused" : "Live"} · ${log.lines.length} lines` +
+              (log.lines.some((l) => l.seq < (log.bootSeq || 0)) ? " · “earlier” lines are from before the last restart" : " since the last restart")),
           lines.length ? h("ol", { class: "log-list" }, lines.map((l) => h("li", { class: `log-line ${LOG_STYLE[l.level] || "info"}` },
             h("span", { class: "log-time mono" }, logTime(log, l)),
             h("span", { class: "log-level mono", "aria-label": LOG_STYLE[l.level] || "info" }, l.level),

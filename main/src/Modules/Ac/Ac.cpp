@@ -181,7 +181,7 @@ void AcModule::run()
     }
 
     const TickType_t now = xTaskGetTickCount();
-    if (now < nextPoll_) {
+    if (static_cast<int32_t>(now - nextPoll_) < 0) {  // wrap-safe: ticks wrap after 49.7 days
         vTaskDelay(pdMS_TO_TICKS(20));
         return;
     }

@@ -115,8 +115,11 @@ esp_err_t WiFiService::init()
         return err;
     }
 
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &onWifiEvent, nullptr));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &onWifiEvent, nullptr));
+    err = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &onWifiEvent, nullptr);
+    if (err == ESP_OK) err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &onWifiEvent, nullptr);
+    if (err != ESP_OK) {
+        return err;
+    }
 
     s_initialized = true;
     return ESP_OK;
@@ -145,9 +148,12 @@ esp_err_t WiFiService::startSoftAp(const char* ssid, const char* password)
     ap.ap.max_connection = 4;
     ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (err == ESP_OK) err = esp_wifi_set_config(WIFI_IF_AP, &ap);
+    if (err == ESP_OK) err = esp_wifi_start();
+    if (err != ESP_OK) {
+        return err;
+    }
     ESP_LOGI(kTag, "SoftAP started ssid=%s", ssid);
     return ESP_OK;
 }

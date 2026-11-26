@@ -79,7 +79,18 @@ void copyJsonString(char* dest, size_t destSize, const cJSON* value)
     }
 }
 
-void appendCatalogEntries(ProfileCatalog& out, const cJSON* profiles)
+// Where a downloaded profile is kept. A hash of the whole id keeps SPIFFS names short
+// without two ids sharing a file.
+void downloadedPath(const char* id, char* out, size_t size)
+{
+    uint32_t hash = 2166136261u;  // FNV-1a
+    for (const char* c = id; *c != '\0'; ++c) hash = (hash ^ static_cast<uint8_t>(*c)) * 16777619u;
+    std::snprintf(out, size, "/spiffs/profiles/d_%08lx.json", static_cast<unsigned long>(hash));
+}
+
+// `remote` entries come from the unsigned downloaded catalog: they may only point at a
+// signed download, never at a file already on the device.
+void appendCatalogEntries(ProfileCatalog& out, const cJSON* profiles, bool remote)
 {
     if (!cJSON_IsArray(profiles)) {
         return;
@@ -127,6 +138,10 @@ void appendCatalogEntries(ProfileCatalog& out, const cJSON* profiles)
 
         const cJSON* bundled = cJSON_GetObjectItem(item, "bundled");
         entry.bundled = cJSON_IsBool(bundled) ? cJSON_IsTrue(bundled) : (entry.url[0] == '\0');
+        if (remote) {
+            entry.relativePath[0] = '\0';
+            entry.bundled = false;
+        }
 
         if (entry.id[0] != '\0' && entry.bus != BusKind::Unknown) {
             out.count++;
@@ -251,8 +266,7 @@ esp_err_t downloadProfile(const ProfileCatalogEntry& entry, LoadedAcProfile& out
     }
 
     char localPath[128] = {};
-    // Keep SPIFFS object names short.
-    std::snprintf(localPath, sizeof(localPath), "/spiffs/profiles/d_%.8s.json", entry.id);
+    downloadedPath(entry.id, localPath, sizeof(localPath));
 
     if (!writeFileAtomic(localPath, body)) {
         return ESP_FAIL;
@@ -319,14 +333,14 @@ esp_err_t ProfileRepository::loadCatalog(ProfileCatalog& out)
     if (cJSON_IsNumber(schema)) {
         out.schemaVersion = static_cast<uint16_t>(schema->valueint);
     }
-    appendCatalogEntries(out, cJSON_GetObjectItem(root, "profiles"));
+    appendCatalogEntries(out, cJSON_GetObjectItem(root, "profiles"), false);
     cJSON_Delete(root);
 
     const std::string remote = readFile(kRemoteCatalogPath);
     if (!remote.empty()) {
         cJSON* remoteRoot = cJSON_Parse(remote.c_str());
         if (remoteRoot != nullptr) {
-            appendCatalogEntries(out, cJSON_GetObjectItem(remoteRoot, "profiles"));
+            appendCatalogEntries(out, cJSON_GetObjectItem(remoteRoot, "profiles"), true);
             cJSON_Delete(remoteRoot);
         }
     }
@@ -384,15 +398,20 @@ esp_err_t ProfileRepository::loadProfile(const char* profileId, LoadedAcProfile&
     }
 
     char path[128] = {};
-    if (match->relativePath[0] != '\0') {
-        std::snprintf(path, sizeof(path), "/spiffs/%s", match->relativePath);
+    const bool downloaded = match->relativePath[0] == '\0';
+    if (downloaded) {
+        downloadedPath(match->id, path, sizeof(path));
     } else {
-        std::snprintf(path, sizeof(path), "/spiffs/profiles/d_%.8s.json", match->id);
+        std::snprintf(path, sizeof(path), "/spiffs/%s", match->relativePath);
     }
 
     const std::string json = readFile(path);
     if (json.empty()) {
         return ESP_ERR_NOT_FOUND;
+    }
+    // A downloaded file is checked again on every load, against the signed catalog entry.
+    if (downloaded && verifyDownloadedProfile(*match, json) != ESP_OK) {
+        return ESP_ERR_INVALID_CRC;
     }
 
     err = parseProfileMetadata(json, match, out);

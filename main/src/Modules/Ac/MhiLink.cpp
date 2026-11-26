@@ -34,6 +34,7 @@ portMUX_TYPE selectLock = portMUX_INITIALIZER_UNLOCKED;
 bool selectNext = false;
 bool armed = false;
 int sckPin = -1;
+int probe[kMhiWiringCount] = {-1, -1};
 uint32_t clockBursts = 0;
 
 void IRAM_ATTR ready(spi_slave_transaction_t*)
@@ -207,14 +208,16 @@ int clockEdges(gpio_num_t pin)
     pcnt_channel_handle_t channel = nullptr;
     int edges = 0;
     if (pcnt_new_channel(unit, &channelConfig, &channel) == ESP_OK) {
-        // A pin that is not wired (floating) must not count as a clock.
+        // The PCNT driver turns the pull-up on; with both pulls an unwired pin floats near
+        // the threshold and counts noise. Pull-down only, so it stays quiet.
+        gpio_pullup_dis(pin);
         gpio_pulldown_en(pin);
         pcnt_channel_set_edge_action(channel, PCNT_CHANNEL_EDGE_ACTION_INCREASE,
                                      PCNT_CHANNEL_EDGE_ACTION_HOLD);
         if (pcnt_unit_enable(unit) == ESP_OK) {
             pcnt_unit_clear_count(unit);
             pcnt_unit_start(unit);
-            for (int i = 0; i < 20 && edges < 1000; ++i) {
+            for (int i = 0; i < 20; ++i) {
                 vTaskDelay(pdMS_TO_TICKS(10));
                 int count = 0;
                 pcnt_unit_get_count(unit, &count);
@@ -242,20 +245,35 @@ size_t detectWiring(const MhiWiring* wirings, size_t count)
     }
     if (stored >= count) stored = 0;
 
-    // A clocking indoor unit gives hundreds of edges; noise or crosstalk a few.
+    // A clocking indoor unit gives hundreds of edges; noise or crosstalk a few. The pin
+    // with the most edges wins, so crosstalk on the other pin cannot.
     constexpr int kMinEdges = 32;
+    size_t best = count;
+    int bestEdges = kMinEdges - 1;
     for (size_t i = 0; i < count; ++i) {
         const int edges = clockEdges(wirings[i].pins.sckPin);
+        if (i < kMhiWiringCount) probe[i] = edges;
         ESP_LOGI("MhiLink", "Clock edges on GPIO%d (%s): %d", wirings[i].pins.sckPin, wirings[i].name, edges);
-        if (edges < kMinEdges) continue;
-        if (i != stored && nvs_open(kWiringNamespace, NVS_READWRITE, &handle) == ESP_OK) {
-            if (nvs_set_u8(handle, kWiringKey, static_cast<uint8_t>(i)) == ESP_OK) (void)nvs_commit(handle);
-            nvs_close(handle);
+        if (edges > bestEdges) {
+            best = i;
+            bestEdges = edges;
         }
-        return i;
     }
-    ESP_LOGW("MhiLink", "No AC clock found; using %s", wirings[stored].name);
-    return stored;
+    if (best == count) {
+        ESP_LOGW("MhiLink", "No AC clock found; using %s", wirings[stored].name);
+        return stored;
+    }
+    if (best != stored && nvs_open(kWiringNamespace, NVS_READWRITE, &handle) == ESP_OK) {
+        if (nvs_set_u8(handle, kWiringKey, static_cast<uint8_t>(best)) == ESP_OK) (void)nvs_commit(handle);
+        nvs_close(handle);
+    }
+    ESP_LOGI("MhiLink", "Using %s wiring", wirings[best].name);
+    return best;
+}
+
+int probedEdges(size_t wiring)
+{
+    return wiring < kMhiWiringCount ? probe[wiring] : -1;
 }
 
 int activeSckPin()

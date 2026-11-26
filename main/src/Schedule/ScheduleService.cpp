@@ -1,5 +1,6 @@
 #include "src/Schedule/ScheduleService.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 
@@ -136,7 +137,14 @@ void ScheduleService::tick(RuntimeController& runtime)
         if (!scheduleRuleDue(cfg.rules[i], local)) {
             continue;
         }
-        const AcDesiredState next = scheduleRuleApply(cfg.rules[i], runtime.snapshot().desired);
+        const RuntimeSnapshot snapshot = runtime.snapshot();
+        AcDesiredState next = scheduleRuleApply(cfg.rules[i], snapshot.desired);
+        // Rules allow 10-35 °C; a unit with a narrower range would reject the whole command.
+        const AcRuntimeCapabilities& caps = snapshot.acCapabilities;
+        if (caps.maxTempC > caps.minTempC) {
+            next.targetTempC = std::min(std::max(next.targetTempC, static_cast<float>(caps.minTempC)),
+                                        static_cast<float>(caps.maxTempC));
+        }
         if (runtime.requestDesiredState(next, RuntimeCommandSource::Schedule) !=
             RuntimeRequestStatus::Accepted) {
             ESP_LOGW(kTag, "Rule %u could not be queued", static_cast<unsigned>(i));

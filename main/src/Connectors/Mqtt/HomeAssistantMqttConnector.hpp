@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "cJSON.h"
 #include "mqtt_client.h"
 
@@ -49,6 +51,12 @@ private:
     uint32_t publishedRevision_ = 0;
     TickType_t reconnectAt_ = 0;
     uint32_t reconnectDelayMs_ = 1000;
+    // Set by the MQTT task, handled in tick() on the main loop, which owns every member above.
+    enum class Event : uint8_t { None, Connected, Disconnected };
+    std::atomic<Event> pendingEvent_{Event::None};  // the latest connection change wins
+    std::atomic<bool> republish_{false};             // Home Assistant came back online
+    std::atomic<bool> extrasDue_{false};
+    std::atomic<bool> clientError_{false};
 };
 
 }  // namespace opencomfort

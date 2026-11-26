@@ -45,7 +45,7 @@ struct PortalContext {
     bool success = false;
     UserConfig result = {};
     httpd_handle_t server = nullptr;
-    TaskHandle_t dnsTask = nullptr;
+    volatile bool dnsAlive = false;  // set before the task starts, cleared as it exits
     volatile bool dnsRunning = false;
 };
 
@@ -93,64 +93,78 @@ esp_err_t sendError(httpd_req_t* req, int status, const char* message)
     return sendJson(req, json, status);
 }
 
-void dnsTask(void* /*arg*/)
+// Offset just past the single question, or 0 when the query is not one we answer.
+size_t questionEnd(const uint8_t* packet, size_t length)
 {
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sock < 0) {
-        vTaskDelete(nullptr);
-        return;
+    if (packet[4] != 0 || packet[5] != 1) return 0;  // exactly one question
+    size_t at = 12;
+    while (at < length && packet[at] != 0) {
+        if ((packet[at] & 0xC0) != 0) return 0;  // no compression in a question
+        at += static_cast<size_t>(packet[at]) + 1;
     }
+    at += 1 + 4;  // root label, QTYPE, QCLASS
+    return at <= length ? at : 0;
+}
 
-    sockaddr_in addr = {};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(kDnsPort);
-    bind(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-
+// Answers every A query with the SoftAP address, so phones open the setup page.
+void dnsTask(void* arg)
+{
+    auto* ctx = static_cast<PortalContext*>(arg);
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (sock >= 0) {
+        sockaddr_in addr = {};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_port = htons(kDnsPort);
+        // A receive timeout lets the loop notice dnsRunning going false.
+        timeval timeout = {0, 500000};
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        if (bind(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+            ESP_LOGW(kTag, "DNS port busy; open http://192.168.4.1 by hand");
+            ctx->dnsRunning = false;
+        }
+    }
     uint8_t buffer[512];
-    while (g_ctx != nullptr && g_ctx->dnsRunning) {
+    while (sock >= 0 && ctx->dnsRunning) {
         sockaddr_in source = {};
         socklen_t sourceLen = sizeof(source);
         const int len =
             recvfrom(sock, buffer, sizeof(buffer), 0, reinterpret_cast<sockaddr*>(&source), &sourceLen);
-        if (len < 12) {
+        if (len < 12 || (buffer[2] & 0x80) != 0) {  // too short, or a response
             continue;
         }
-
-        // Minimal DNS response: point every A query to SoftAP IP.
+        // Drop anything after the question (EDNS records), then answer it.
+        const size_t end = questionEnd(buffer, static_cast<size_t>(len));
+        if (end == 0 || end + 16 > sizeof(buffer)) {
+            continue;
+        }
+        const bool typeA = buffer[end - 4] == 0x00 && buffer[end - 3] == 0x01;
         buffer[2] = 0x81;
         buffer[3] = 0x80;
         buffer[6] = 0x00;
-        buffer[7] = 0x01;
+        buffer[7] = typeA ? 0x01 : 0x00;  // other types (AAAA) get an empty answer
         buffer[8] = 0x00;
         buffer[9] = 0x00;
         buffer[10] = 0x00;
         buffer[11] = 0x00;
-
-        size_t responseLen = static_cast<size_t>(len);
-        if (responseLen + 16 < sizeof(buffer)) {
-            buffer[responseLen++] = 0xC0;
-            buffer[responseLen++] = 0x0C;
-            buffer[responseLen++] = 0x00;
-            buffer[responseLen++] = 0x01;
-            buffer[responseLen++] = 0x00;
-            buffer[responseLen++] = 0x01;
-            buffer[responseLen++] = 0x00;
-            buffer[responseLen++] = 0x00;
-            buffer[responseLen++] = 0x00;
-            buffer[responseLen++] = 0x3C;
-            buffer[responseLen++] = 0x00;
-            buffer[responseLen++] = 0x04;
-            buffer[responseLen++] = 192;
-            buffer[responseLen++] = 168;
-            buffer[responseLen++] = 4;
-            buffer[responseLen++] = 1;
-            sendto(sock, buffer, responseLen, 0, reinterpret_cast<sockaddr*>(&source), sourceLen);
+        size_t responseLen = end;
+        if (typeA) {
+            const uint8_t answer[] = {0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+                                      0x00, 0x3C, 0x00, 0x04, 192,  168,  4,    1};
+            std::memcpy(buffer + responseLen, answer, sizeof(answer));
+            responseLen += sizeof(answer);
         }
+        sendto(sock, buffer, responseLen, 0, reinterpret_cast<sockaddr*>(&source), sourceLen);
     }
-
-    close(sock);
+    if (sock >= 0) close(sock);
+    ctx->dnsAlive = false;  // run() waits for this before ctx goes away
     vTaskDelete(nullptr);
+}
+
+void stopDns(PortalContext& ctx)
+{
+    ctx.dnsRunning = false;
+    for (int i = 0; i < 20 && ctx.dnsAlive; ++i) vTaskDelay(pdMS_TO_TICKS(100));
 }
 
 esp_err_t handleRoot(httpd_req_t* req)
@@ -552,11 +566,12 @@ bool CaptivePortal::run(UserConfig& outConfig)
     }
 
     ctx.dnsRunning = true;
-    xTaskCreate(dnsTask, "dns_hijack", 3072, nullptr, 3, &ctx.dnsTask);
+    ctx.dnsAlive = true;
+    if (xTaskCreate(dnsTask, "dns_hijack", 3072, &ctx, 3, nullptr) != pdPASS) ctx.dnsAlive = false;
 
     if (startHttpServer(ctx) != ESP_OK) {
         ESP_LOGE(kTag, "HTTP server start failed");
-        ctx.dnsRunning = false;
+        stopDns(ctx);
         g_ctx = nullptr;
         return false;
     }
@@ -570,8 +585,7 @@ bool CaptivePortal::run(UserConfig& outConfig)
         httpd_stop(ctx.server);
         ctx.server = nullptr;
     }
-    ctx.dnsRunning = false;
-    vTaskDelay(pdMS_TO_TICKS(100));
+    stopDns(ctx);
     WiFiService::stopSoftAp();
 
     outConfig = ctx.result;

@@ -23,6 +23,7 @@
 
 extern "C" {
 #include "esp_log.h"
+#include "esp_app_desc.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
@@ -33,11 +34,44 @@ extern "C" {
 namespace opencomfort {
 namespace {
 constexpr const char* kTag = "Application";
+
+// Returning from run() would leave the device on Wi-Fi with no web page and no log of
+// why. Restart instead; an OTA image that fails here is not yet confirmed, so the
+// bootloader goes back to the previous firmware.
+[[noreturn]] void restartAfter(const char* failure)
+{
+    ESP_LOGE(kTag, "%s; restarting in 30 s", failure);
+    vTaskDelay(pdMS_TO_TICKS(30000));
+    esp_restart();
+    while (true) vTaskDelay(portMAX_DELAY);
+}
+
+const char* resetReasonName(esp_reset_reason_t reason)
+{
+    switch (reason) {
+        case ESP_RST_POWERON: return "power on";
+        case ESP_RST_SW: return "restart";
+        case ESP_RST_PANIC: return "crash (panic)";
+        case ESP_RST_INT_WDT: return "interrupt watchdog";
+        case ESP_RST_TASK_WDT: return "task watchdog";
+        case ESP_RST_WDT: return "watchdog";
+        case ESP_RST_BROWNOUT: return "brownout (power dip)";
+        case ESP_RST_DEEPSLEEP: return "deep sleep";
+        case ESP_RST_EXT: return "reset pin";
+        default: return "unknown";
+    }
+}
 }
 
 void Application::run()
 {
     LogBuffer::install();  // first, so the portal's log shows the whole boot
+    {
+        const esp_reset_reason_t reason = esp_reset_reason();
+        const bool unexpected = reason != ESP_RST_POWERON && reason != ESP_RST_SW;
+        ESP_LOG_LEVEL(unexpected ? ESP_LOG_ERROR : ESP_LOG_INFO, kTag, "Started after %s; firmware %s",
+                      resetReasonName(reason), esp_app_get_description()->version);
+    }
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -47,11 +81,14 @@ void Application::run()
     }
 
     if (!UserConfigStore::init()) {
-        ESP_LOGE(kTag, "User config store init failed");
-        return;
+        restartAfter("User config store init failed");
     }
 
-    ESP_ERROR_CHECK(ProfileRepository::initSpiffs());
+    // Without it no AC profile loads and the module bootstrap below restarts; logged first so
+    // the cause shows in Logs instead of an abort loop.
+    if (const esp_err_t spiffs = ProfileRepository::initSpiffs(); spiffs != ESP_OK) {
+        ESP_LOGE(kTag, "Profile storage unavailable: %s", esp_err_to_name(spiffs));
+    }
 
     const ProductDefinition& product = currentProduct();
     ESP_LOGI(kTag, "Product=%s module=%s board=%s", product.productId, toString(product.module),
@@ -103,17 +140,18 @@ void Application::run()
         ESP_LOGW(kTag, "Provisioning required (config status=%s)", toString(loaded.status));
         CaptivePortal portal(product);
         if (!portal.run(config)) {
-            ESP_LOGE(kTag, "Captive portal failed");
-            return;
+            restartAfter("Captive portal failed");
         }
         ESP_LOGI(kTag, "Provisioning complete, restarting");
         esp_restart();
         return;
     }
 
-    ESP_ERROR_CHECK(WiFiService::init());
-    char hostname[kMaxHostnameLen + 1];
-    ESP_ERROR_CHECK(resolveDeviceHostname(config, hostname, sizeof(hostname)));
+    if (WiFiService::init() != ESP_OK) {
+        restartAfter("Wi-Fi init failed");
+    }
+    char hostname[kMaxHostnameLen + 1] = "opencomfort";
+    ESP_ERROR_CHECK_WITHOUT_ABORT(resolveDeviceHostname(config, hostname, sizeof(hostname)));
     ESP_ERROR_CHECK_WITHOUT_ABORT(WiFiService::setStationHostname(hostname));
     err = WiFiService::startStationFromStorage(20000);
     if (err != ESP_OK) {
@@ -127,20 +165,17 @@ void Application::run()
 
     std::unique_ptr<IModule> module = ModuleFactory::create(product, config);
     if (!module) {
-        ESP_LOGE(kTag, "Module factory failed");
-        return;
+        restartAfter("Module factory failed");
     }
 
     module->bootstrap();
     if (!module->isBooted()) {
-        ESP_LOGE(kTag, "Module bootstrap failed");
-        return;
+        restartAfter("Module bootstrap failed");
     }
 
     RuntimeController runtime(*module);
     if (!runtime.init()) {
-        ESP_LOGE(kTag, "Runtime controller init failed");
-        return;
+        restartAfter("Runtime controller init failed");
     }
 
     ConnectorManager connectors;
@@ -152,8 +187,7 @@ void Application::run()
 #endif
     registered = registered && connectors.add(std::make_unique<MatterConnector>(runtime));
     if (!registered) {
-        ESP_LOGE(kTag, "Connector registration failed");
-        return;
+        restartAfter("Connector registration failed");
     }
     err = connectors.start(config);
     if (err != ESP_OK) {
@@ -179,7 +213,7 @@ void Application::run()
         ScheduleService::instance().tick(runtime);
         UpdateService::instance().tick(WiFiService::isStationConnected());
         const TickType_t now = xTaskGetTickCount();
-        if (now >= nextResetPoll) {
+        if (static_cast<int32_t>(now - nextResetPoll) >= 0) {  // wrap-safe
             nextResetPoll = now + pdMS_TO_TICKS(1000);
             if (FactoryReset::checkAndPerform(resetHoldMs)) {
                 return;

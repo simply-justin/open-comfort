@@ -14,6 +14,8 @@ esp_err_t start(const BoardSpiPins& pins, bool extended);
 // wiring found last time (kept in NVS), or 0.
 size_t detectWiring(const MhiWiring* wirings, size_t count);
 int activeSckPin();
+// Clock edges seen on each wiring's SCK during the boot probe (-1 before it ran).
+int probedEdges(size_t wiring);
 uint32_t observedClockBursts();
 esp_err_t exchange(const AcDesiredState* command, AcReportedState& state);
 }
