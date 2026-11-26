@@ -26,7 +26,7 @@ Set these with `idf.py menuconfig` under **OpenComfort Product**, or in an `sdkc
 
 | File | Purpose |
 |---|---|
-| `sdkconfig.defaults` | Target, 4 MB flash, OTA partition table with app rollback, certificate bundle, size-optimised build |
+| `sdkconfig.defaults` | Target, 4 MB flash, OTA partition table with app rollback, signed updates, certificate bundle, size-optimised build |
 | `sdkconfig.matter.defaults` | Matter profile and 16 MB layout; apply after `sdkconfig.defaults` |
 | `sdkconfig.full.defaults` | Adds Home Assistant MQTT to the Matter profile; apply after `sdkconfig.matter.defaults` |
 | `sdkconfig.8mb.defaults` | Selects the shared Matter/Full 8 MB layout; apply last |

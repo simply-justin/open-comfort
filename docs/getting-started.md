@@ -74,7 +74,7 @@ On networks without mDNS, use the IP address from your router's client list or t
 
 **Online:** in the portal, **Settings → Firmware** checks the GitHub releases of `CONFIG_OPENCOMFORT_UPDATE_REPO` (default `simply-justin/open-comfort`) and offers the newest version built for this device (`ha-4mb`, `matter-8mb`, `matter-16mb`, `full-8mb` or `full-16mb`). Choose **Releases** (default) or **Pre-releases**; turn on **Install automatically** to install new versions after the daily check. Development builds are offered the newest release but never update themselves automatically.
 
-**From a file:** under **Install from a file**, upload a `.bin` you built yourself, for example `build-device/OpenComfort.bin`.
+**From a file:** under **Install from a file**, upload a release `.bin` or a build you signed yourself (see [Firmware signing key](../SECURITY.md#firmware-signing-key)). Unsigned images are refused. Plain `idf.py build` output goes on over USB; a device running such an unsigned build cannot install updates until a signed release is flashed over USB again.
 
 Either way the new image goes to the inactive OTA slot. If it does not start properly, the device returns to the previous version after the next reset. Devices flashed before OTA support used a single-app partition table. Flash those once more over USB (`idf.py -p PORT flash`); the configuration in NVS is kept.
 

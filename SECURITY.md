@@ -9,7 +9,7 @@ Please do **not** open a public issue for security problems. Report them private
 - The setup network uses a WPA2 password that is the same on every device unless `CONFIG_OPENCOMFORT_PORTAL_AP_PASSWORD` is overridden per device.
 - The runtime portal is plain HTTP on the local network. Keep devices on a trusted LAN or IoT network and never forward the port to the internet.
 - Flash encryption and Secure Boot are off by default, so anyone with physical access can read the flash.
-- Without Secure Boot, firmware updates are checked for integrity, chip and project name, but not signed. Anyone signed in to the portal can install firmware, and online updates trust whatever the configured GitHub repository publishes (downloads use HTTPS with certificate verification). Enable Secure Boot so only images signed with your key can boot.
+- Firmware updates (online and uploaded) must be signed with the release key, without hardware Secure Boot (`CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT`, RSA-3072). This stops a stolen portal session or a tampered download from installing other firmware. It does not stop someone with physical access: USB flashing is never checked. Enable Secure Boot for that. See [Firmware signing](docs/runtime-api.md#firmware-signing).
 
 # Production security enablement
 
@@ -23,8 +23,10 @@ incorrectly can permanently lock a device.
 - User configuration uses dual-slot NVS commits.
 - MQTT credentials and the salted administrator credential are held in a
   separate NVS namespace and are never returned by the runtime API.
-- The post-setup portal uses expiring in-memory sessions, CSRF tokens, bounded
-  requests, and login throttling.
+- The post-setup portal uses expiring sessions (remembered ones end after 90 days),
+  CSRF tokens, bounded requests, login throttling per client, a `Host` header check
+  against DNS rebinding, and `X-Frame-Options: DENY`. Changing the administrator
+  password requires the current one.
 - Remotely downloaded AC profiles require:
   - HTTPS with certificate-bundle verification
   - SHA-256 integrity check
@@ -59,6 +61,25 @@ idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.prod.defaults" reconf
 ```
 
 Only do this with manufacturing key management in place.
+
+## Firmware signing key
+
+The release workflow signs every image with the GitHub secret `OPENCOMFORT_SIGNING_KEY`
+(an RSA-3072 PEM key) and refuses to publish without it. Generate a key once:
+
+```bash
+python -m espsecure generate_signing_key --version 2 --scheme rsa3072 firmware-signing-key.pem
+gh secret set OPENCOMFORT_SIGNING_KEY < firmware-signing-key.pem
+```
+
+Keep a backup outside the repository. Devices only accept updates signed with the key
+of the firmware they run, so with a lost or replaced key every device needs one USB flash.
+Sign a local build to install it through the portal:
+
+```bash
+python -m espsecure sign_data --version 2 --keyfile firmware-signing-key.pem \
+  --output build/OpenComfort.signed.bin build/OpenComfort.bin
+```
 
 ## Profile signing
 

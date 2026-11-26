@@ -6,7 +6,7 @@ A **profile** is a JSON file that tells OpenComfort how to talk to an air-condit
 
 The bundled catalog is `main/spiffs/profiles/index.json`. It ships in the SPIFFS image and is trusted as part of the firmware. Portal (OTA) updates replace only the app, so changes to bundled profiles reach a device through a USB flash or the remote catalog.
 
-When `CONFIG_OPENCOMFORT_PROFILE_CATALOG_URL` is set, the device also downloads a remote catalog over HTTPS after it joins Wi-Fi. Remote entries are merged with the bundled ones. A remote profile is only used after its SHA-256 and ECDSA signature check out.
+When `CONFIG_OPENCOMFORT_PROFILE_CATALOG_URL` is set, the device also downloads a remote catalog over HTTPS after it joins Wi-Fi. Remote entries are merged with the bundled ones; a bundled entry with the same id wins. A remote profile is only used after its SHA-256 and ECDSA signature check out, and the check runs again each time it loads from SPIFFS. The remote catalog is not signed itself, so its `path` field is ignored: a remote entry can only point to a signed download.
 
 ## Catalog format
 

@@ -19,7 +19,7 @@ OpenComfort is modular ESP-IDF firmware for smart-home products. A product defin
 - **Hardened transports** for UART, SPI and CAN with pins fixed by the board definition.
 - **Durable configuration** in NVS with dual-slot commits and schema migration.
 - **Schedules and a sleep timer** that run on the device, plus a 24-hour room temperature history.
-- **Firmware updates** from GitHub releases (release or pre-release channel, optional automatic install) or from a file, with automatic rollback if a new image fails to start.
+- **Signed firmware updates** from GitHub releases (release or pre-release channel, optional automatic install) or from a file, with automatic rollback if a new image fails to start.
 - **Factory reset** by switching the power off and on 5 times, or by holding the BOOT button.
 - **Production security prep** for Secure Boot, flash encryption and NVS encryption.
 

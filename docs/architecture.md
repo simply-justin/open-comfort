@@ -93,7 +93,7 @@ Pins come from the board definition in `main/src/Product/ProductDefinition.cpp`,
 | Matter / Full 16 MB | `partitions-matter-16mb.csv` | NVS, `nvs_keys`, `fctry`, `matter`, two 5 MB OTA slots, 2 MB SPIFFS, core dump |
 | Production 4 MB | `partitions-prod.csv` | Legacy layout plus an encrypted `nvs_keys` partition |
 
-Firmware updates go to the inactive OTA slot. App rollback is enabled: a new image is kept only after it has started Wi-Fi, the module and the connectors (or reached setup); otherwise the bootloader returns to the previous image on the next reset.
+Firmware updates go to the inactive OTA slot and must be signed with the release key (see [Firmware signing](runtime-api.md#firmware-signing)). App rollback is enabled: a new image is kept only after it has started Wi-Fi, the module and the connectors (or reached setup); otherwise the bootloader returns to the previous image on the next reset.
 
 ## Extending the firmware
 
