@@ -47,6 +47,8 @@ public:
     static esp_err_t scan(WifiScanEntry* out, size_t capacity, size_t& count, uint32_t timeoutMs);
     static WifiStaState stationState();
     static bool isStationConnected();
+    // Why the station last lost or failed its connection (wifi_err_reason_t), 0 if never.
+    static uint8_t lastDisconnectReason();
     static esp_err_t saveCredentials(const WifiCredentials& credentials);
 };
 

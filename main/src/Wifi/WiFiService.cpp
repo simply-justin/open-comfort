@@ -26,6 +26,7 @@ esp_netif_t* s_apNetif = nullptr;
 esp_netif_t* s_staNetif = nullptr;
 // Set once the device runs from stored credentials; then a lost connection is retried forever.
 bool s_autoReconnect = false;
+volatile uint8_t s_lastReason = 0;
 
 // The STA_START handler may already have started connecting (timing depends on what else
 // runs, e.g. Matter and BLE), so "already connecting" is success, not an error.
@@ -50,6 +51,11 @@ void onWifiEvent(void* /*arg*/, esp_event_base_t eventBase, int32_t eventId, voi
     }
 
     if (eventBase == WIFI_EVENT && eventId == WIFI_EVENT_STA_DISCONNECTED) {
+        const uint8_t reason = static_cast<const wifi_event_sta_disconnected_t*>(eventData)->reason;
+        if (reason != s_lastReason) {  // once per change, so retries do not flood the log
+            ESP_LOGW(kTag, "Station disconnected, reason %u", static_cast<unsigned>(reason));
+        }
+        s_lastReason = reason;
         s_staState = WifiStaState::Failed;
         if (s_autoReconnect) {
             // The driver's own scan/auth timeouts pace these retries (a few seconds each).
@@ -64,6 +70,7 @@ void onWifiEvent(void* /*arg*/, esp_event_base_t eventBase, int32_t eventId, voi
 
     if (eventBase == IP_EVENT && eventId == IP_EVENT_STA_GOT_IP) {
         s_staState = WifiStaState::Connected;
+        s_lastReason = 0;
         if (s_events != nullptr) {
             xEventGroupSetBits(s_events, kConnectedBit);
         }
@@ -203,15 +210,32 @@ esp_err_t WiFiService::connectStation(const WifiCredentials& credentials, uint32
         return err;
     }
 
-    const EventBits_t bits =
-        xEventGroupWaitBits(s_events, kConnectedBit | kFailBit, pdTRUE, pdFALSE,
-                            pdMS_TO_TICKS(timeoutMs));
-    if (bits & kConnectedBit) {
-        ESP_LOGI(kTag, "Station connected");
-        return ESP_OK;
+    // A first attempt often fails while the radio moves the setup network to the router's
+    // channel, so try again until the timeout, except when the password is wrong.
+    const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeoutMs);
+    for (int attempt = 1;; ++attempt) {
+        const TickType_t now = xTaskGetTickCount();
+        const TickType_t left = static_cast<int32_t>(deadline - now) > 0 ? deadline - now : 0;
+        const EventBits_t bits =
+            xEventGroupWaitBits(s_events, kConnectedBit | kFailBit, pdTRUE, pdFALSE, left);
+        if (bits & kConnectedBit) {
+            ESP_LOGI(kTag, "Station connected (attempt %d)", attempt);
+            return ESP_OK;
+        }
+        const uint8_t reason = s_lastReason;
+        const bool wrongPassword = reason == WIFI_REASON_AUTH_FAIL || reason == WIFI_REASON_MIC_FAILURE ||
+                                   reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
+                                   reason == WIFI_REASON_HANDSHAKE_TIMEOUT;
+        if ((bits & kFailBit) == 0 || attempt >= 4 || (wrongPassword && attempt >= 2) ||
+            static_cast<int32_t>(deadline - xTaskGetTickCount()) <= 0) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(500));
+        s_staState = WifiStaState::Connecting;
+        if (connectOnce() != ESP_OK) break;
     }
 
-    ESP_LOGW(kTag, "Station connection failed or timed out");
+    ESP_LOGW(kTag, "Station connection failed, reason %u", static_cast<unsigned>(s_lastReason));
     s_staState = WifiStaState::Failed;
     return ESP_ERR_TIMEOUT;
 }
@@ -310,6 +334,11 @@ esp_err_t WiFiService::scan(WifiScanEntry* out, size_t capacity, size_t& count, 
 WifiStaState WiFiService::stationState()
 {
     return s_staState;
+}
+
+uint8_t WiFiService::lastDisconnectReason()
+{
+    return s_lastReason;
 }
 
 bool WiFiService::isStationConnected()

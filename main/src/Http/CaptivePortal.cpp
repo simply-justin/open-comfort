@@ -20,6 +20,7 @@ extern "C" {
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
+#include "esp_wifi.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -251,7 +252,21 @@ esp_err_t handleWifiPut(httpd_req_t* req)
     cJSON_Delete(root);
 
     if (WiFiService::connectStation(credentials, 20000) != ESP_OK) {
-        return sendError(req, 400, "wifi_connect_failed");
+        switch (WiFiService::lastDisconnectReason()) {
+            case WIFI_REASON_AUTH_FAIL:
+            case WIFI_REASON_MIC_FAILURE:
+            case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+            case WIFI_REASON_HANDSHAKE_TIMEOUT:
+                return sendError(req, 400, "wifi_wrong_password");
+            case WIFI_REASON_NO_AP_FOUND:
+            case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
+                return sendError(req, 400, "wifi_not_found");
+            case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY:
+            case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
+                return sendError(req, 400, "wifi_security_unsupported");
+            default:
+                return sendError(req, 400, "wifi_connect_failed");
+        }
     }
 
     g_ctx->draft.wifi = credentials;

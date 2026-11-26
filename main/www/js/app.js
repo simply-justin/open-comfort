@@ -39,6 +39,9 @@
     choose_one_integration: "Choose Home Assistant or Matter, not both.",
     mqtt_not_supported: "This firmware has no Home Assistant (MQTT) support.",
     wifi_connect_failed: "Could not join. Check the password and try again.",
+    wifi_wrong_password: "The network refused the password. Check it and try again.",
+    wifi_not_found: "The network is out of reach. Move the device closer to the router, or check that it is a 2.4 GHz network.",
+    wifi_security_unsupported: "This network uses security the device does not support. Use WPA2 or WPA3 (personal).",
     request_failed: "The device did not answer. Check that you are still on the OpenComfort network.",
     profiles_unavailable: "Could not download the list of air conditioners. Check that this Wi-Fi network has internet, then try again.",
   };
