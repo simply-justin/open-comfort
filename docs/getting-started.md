@@ -110,6 +110,7 @@ CI runs the same script on every push and pull request.
 | `STA connect failed at boot` in the log | Network out of range or credentials changed | Check the network, or factory reset and run setup again |
 | `opencomfort-xxxx.local` does not resolve | The network or client does not support mDNS | Use the IP address instead |
 | Model missing from the list | No profile for it in the catalog | See [AC Profiles](profiles.md#adding-an-air-conditioner) |
+| Portal drops out, Logs show `Started after panic` | The firmware crashed | Matter and Full builds log `Crash in task …` and `Backtrace: …` after the restart. Decode the addresses with the release's `opencomfort-elf.zip`: `xtensa-esp32s3-elf-addr2line -pfiaC -e opencomfort-<variant>.elf <addresses>`, and attach the result to an issue |
 
 ## Hardware safety
 

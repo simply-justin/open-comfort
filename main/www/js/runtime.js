@@ -93,6 +93,7 @@
     release_data_too_large: "GitHub sent more release data than this device can read. Install the new version from a file.",
     no_build_for_this_device: "The newest release has no build for this device.",
     bad_release_data: "GitHub sent something unexpected. Try again later.",
+    out_of_memory: "The device is short on memory right now. Try again in a minute.",
     download_failed: "The download did not start.",
     download_interrupted: "The download stopped. Try again.",
     not_opencomfort_firmware: "The release file is not OpenComfort firmware.",

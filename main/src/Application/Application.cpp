@@ -1,5 +1,6 @@
 #include "src/Application/Application.hpp"
 
+#include <cstdio>
 #include <memory>
 
 #include "sdkconfig.h"
@@ -23,6 +24,7 @@
 
 extern "C" {
 #include "esp_log.h"
+#include "esp_core_dump.h"
 #include "esp_app_desc.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -63,6 +65,39 @@ const char* resetReasonName(esp_reset_reason_t reason)
 }
 }
 
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+// A panic stores a core dump in flash; put its summary in the log (Settings > Logs) and
+// erase it. Decode the addresses with the release's ELF:
+//   xtensa-esp32s3-elf-addr2line -pfiaC -e OpenComfort.elf <addresses>
+static void logStoredCrash()
+{
+    if (esp_core_dump_image_check() != ESP_OK) return;  // none stored
+    esp_core_dump_summary_t summary{};
+    if (esp_core_dump_get_summary(&summary) == ESP_OK) {
+        ESP_LOGE(kTag, "Crash in task %s at 0x%08lx (cause %lu, address 0x%08lx), app %.8s",
+                 summary.exc_task, static_cast<unsigned long>(summary.exc_pc),
+                 static_cast<unsigned long>(summary.ex_info.exc_cause),
+                 static_cast<unsigned long>(summary.ex_info.exc_vaddr),
+                 reinterpret_cast<const char*>(summary.app_elf_sha256));
+        const esp_core_dump_bt_info_t& bt = summary.exc_bt_info;
+        const uint32_t depth = bt.depth < 16 ? bt.depth : 16;
+        // Eight addresses per line: a log line holds 111 characters.
+        for (uint32_t start = 0; start < depth; start += 8) {
+            char line[8 * 11 + 1] = {};
+            size_t used = 0;
+            for (uint32_t i = start; i < depth && i < start + 8; ++i) {
+                used += static_cast<size_t>(std::snprintf(line + used, sizeof(line) - used, " 0x%08lx",
+                                                          static_cast<unsigned long>(bt.bt[i])));
+            }
+            ESP_LOGE(kTag, "Backtrace%s:%s", bt.corrupted ? " (corrupted)" : "", line);
+        }
+    } else {
+        ESP_LOGE(kTag, "A crash was stored but could not be read");
+    }
+    (void)esp_core_dump_image_erase();
+}
+#endif
+
 void Application::run()
 {
     LogBuffer::install();  // first, so the portal's log shows the whole boot
@@ -72,6 +107,9 @@ void Application::run()
         ESP_LOG_LEVEL(unexpected ? ESP_LOG_ERROR : ESP_LOG_INFO, kTag, "Started after %s; firmware %s",
                       resetReasonName(reason), esp_app_get_description()->version);
     }
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    logStoredCrash();
+#endif
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());

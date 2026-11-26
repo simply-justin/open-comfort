@@ -63,6 +63,7 @@ idf_component_register(
         driver
         vfs
         mbedtls
+        espcoredump
     PRIV_REQUIRES
         ${OPENCOMFORT_OPTIONAL_REQUIRES}
 )

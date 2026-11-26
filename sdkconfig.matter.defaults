@@ -23,3 +23,8 @@ CONFIG_ENABLE_CHIP_SHELL=n
 # Share the ESP-IDF mDNS stack with the portal's opencomfort-xxxx.local name;
 # minimal mDNS would compete for UDP port 5353.
 CONFIG_USE_MINIMAL_MDNS=n
+# A panic keeps a core dump in the 64 KB coredump partition; the next boot logs its summary
+# (task, PC, backtrace) in Settings > Logs and erases it. Few tasks so the dump fits.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=8

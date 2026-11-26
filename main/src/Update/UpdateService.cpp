@@ -165,12 +165,13 @@ void UpdateService::checkTask(void* arg)
         std::lock_guard<std::mutex> lock(self->mutex_);
         prerelease = self->status_.prerelease;
     }
-    // "latest" never returns pre-releases; the list does, newest first. A release with six
-    // assets is ~12 KB of JSON (each asset repeats its uploader), so two releases leave
-    // kMaxReleaseJson room for more assets, and the second covers a newest one without our build.
+    // "latest" never returns pre-releases; the list does, newest first. One release is ~12 KB
+    // of JSON and three times that as a cJSON tree: on a build without PSRAM next to Matter,
+    // Wi-Fi and BLE that is about what fits. Every release builds every variant, so the
+    // newest one is enough.
     char url[160];
     std::snprintf(url, sizeof(url),
-                  prerelease ? "https://api.github.com/repos/%s/releases?per_page=2"
+                  prerelease ? "https://api.github.com/repos/%s/releases?per_page=1"
                              : "https://api.github.com/repos/%s/releases/latest",
                   CONFIG_OPENCOMFORT_UPDATE_REPO);
     std::string body;
@@ -178,12 +179,13 @@ void UpdateService::checkTask(void* arg)
     if (err != ESP_OK) {
         self->fail(err == ESP_ERR_INVALID_RESPONSE ? "no_release_found"
                    : err == ESP_ERR_INVALID_SIZE   ? "release_data_too_large"
+                   : err == ESP_ERR_NO_MEM         ? "out_of_memory"
                                                    : "network_error");
         vTaskDelete(nullptr);
         return;
     }
     cJSON* root = cJSON_Parse(body.c_str());
-    body.clear();
+    std::string().swap(body);  // free the text before the tree is walked
     if (root == nullptr) {
         self->fail("bad_release_data");
         vTaskDelete(nullptr);

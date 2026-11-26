@@ -74,11 +74,15 @@ jobs:
         shell: bash
         run: |
           cp build/OpenComfort.signed.bin opencomfort-${{ matrix.variant }}.bin
+          # For decoding crash backtraces from Settings > Logs (addr2line).
+          cp build/OpenComfort.elf opencomfort-${{ matrix.variant }}.elf
 
       - uses: actions/upload-artifact@v4
         with:
           name: opencomfort-${{ matrix.variant }}
-          path: opencomfort-*.bin
+          path: |
+            opencomfort-*.bin
+            opencomfort-*.elf
 
   release:
     needs: build
@@ -95,4 +99,6 @@ jobs:
         run: |
           flags=""
           case "$GITHUB_REF_NAME" in *-*) flags="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" opencomfort-*.bin --generate-notes $flags
+          # One zip for all ELF files: every asset adds to the release JSON devices read.
+          zip -j opencomfort-elf.zip opencomfort-*.elf
+          gh release create "$GITHUB_REF_NAME" opencomfort-*.bin opencomfort-elf.zip --generate-notes $flags
