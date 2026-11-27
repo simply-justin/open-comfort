@@ -123,8 +123,10 @@ esp_err_t AcModule::applyRuntimeDesired(const AcDesiredState& desired)
         return ESP_ERR_INVALID_ARG;
     }
 
-    const esp_err_t err = mhiLink_ ? mhi::exchange(&desired, reported_)
+    AcReportedState latest = reported_;
+    const esp_err_t err = mhiLink_ ? mhi::exchange(&desired, latest)
                                    : protocol_.applyDesiredState(bus_, desired);
+    if (mhiLink_) applyReading(err == ESP_OK && latest.valid, latest);
     if (err == ESP_OK) {
         const bool changed = desired.powerOn != desired_.powerOn || desired.mode != desired_.mode ||
                              desired.targetTempC != desired_.targetTempC || desired.fan != desired_.fan ||
@@ -189,11 +191,31 @@ void AcModule::run()
 
     AcReportedState latest;
     const esp_err_t pollError = mhiLink_ ? mhi::exchange(nullptr, latest) : protocol_.poll(bus_, latest);
-    if (pollError != ESP_OK || !latest.valid) {
-        reported_ = {};
+    applyReading(pollError == ESP_OK && latest.valid, latest);
+}
+
+// A single lost frame (a stray clock edge) must not blank the state: Home Assistant and the
+// portal would flash "not answering". Only after 5 s without a valid frame is it cleared.
+void AcModule::applyReading(bool ok, AcReportedState latest)
+{
+    const TickType_t now = xTaskGetTickCount();
+    if (!ok) {
+        if (now - lastValid_ >= pdMS_TO_TICKS(5000)) reported_ = {};
         return;
     }
+    lastValid_ = now;
+    holdRoomTemp(latest);
     reported_ = latest;
+}
+
+// The unit reports room temperature in 0.25 °C steps that flicker between two neighbours;
+// Home Assistant shows whole degrees, so near x.5 it jumped a degree on every poll. Only
+// follow a change of 0.5 °C or more.
+void AcModule::holdRoomTemp(AcReportedState& state)
+{
+    if (!state.hasRoomTemp) return;
+    if (std::isnan(shownRoomC_) || std::fabs(state.returnAirC - shownRoomC_) >= 0.5f) shownRoomC_ = state.returnAirC;
+    state.returnAirC = shownRoomC_;
 }
 
 }  // namespace opencomfort

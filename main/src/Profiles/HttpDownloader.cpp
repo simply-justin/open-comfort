@@ -32,7 +32,13 @@ bool reserveFor(DownloadContext& ctx, size_t needed)
     if (grown < needed) grown = needed;
     if (grown > ctx.maxBytes) grown = ctx.maxBytes;
     constexpr size_t kHeadroom = 16 * 1024;
-    if (heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < grown + kHeadroom) return false;
+    const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    if (largest < grown + kHeadroom) {
+        // Measured here, while the TLS session still holds its buffers.
+        ESP_LOGW(kTag, "Download stopped at %u bytes: needs a %u byte block, largest free is %u",
+                 unsigned(body.size()), unsigned(grown + kHeadroom), unsigned(largest));
+        return false;
+    }
     body.reserve(grown);
     return true;
 }
@@ -90,7 +96,6 @@ esp_err_t HttpDownloader::getHttps(const char* url, std::string& outBody, size_t
 
     if (ctx.overflow || ctx.noMemory) {
         std::string().swap(outBody);
-        if (ctx.noMemory) ESP_LOGW(kTag, "Download stopped: not enough free memory");
         return ctx.overflow ? ESP_ERR_INVALID_SIZE : ESP_ERR_NO_MEM;
     }
     if (err != ESP_OK) {

@@ -83,7 +83,9 @@ esp_err_t receive(TickType_t wait, AcReportedState& state)
         return err;
     }
     queued = false;
-    if (done != &transaction || transaction.trans_len != wireSize * 8 || !decode(rx, wireSize, state)) {
+    // A stray clock edge after the frame adds bits at the end; both checksums still guard the
+    // bytes, so only a short frame is rejected outright.
+    if (done != &transaction || transaction.trans_len < wireSize * 8 || !decode(rx, wireSize, state)) {
         if (report) {
             lastReport = xTaskGetTickCount();
             char hex[sizeof(rx) * 2 + 1] = {};
