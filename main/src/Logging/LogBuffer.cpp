@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 
 extern "C" {
 #include "esp_attr.h"
@@ -135,6 +136,10 @@ void LogBuffer::setDebug(bool debug)
     esp_log_level_set("*", debug ? ESP_LOG_DEBUG : ESP_LOG_INFO);
     // The Wi-Fi driver is very chatty at debug level; keep it at info.
     esp_log_level_set("wifi", ESP_LOG_INFO);
+    // The HTTP server logs every header at debug level, session cookies included, and the
+    // Logs page's own polling would fill the buffer with it.
+    for (const char* tag : {"httpd", "httpd_uri", "httpd_parse", "httpd_txrx", "httpd_sess", "event"})
+        esp_log_level_set(tag, ESP_LOG_INFO);
 }
 
 bool LogBuffer::debug()

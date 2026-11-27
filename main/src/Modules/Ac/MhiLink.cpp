@@ -2,6 +2,7 @@
 #include "src/Modules/Ac/MhiLink.hpp"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include "driver/gpio.h"
 #include "driver/pulse_cnt.h"
@@ -70,10 +71,29 @@ esp_err_t receive(TickType_t wait, AcReportedState& state)
 {
     spi_slave_transaction_t* done = nullptr;
     const esp_err_t err = spi_slave_get_trans_result(host, &done, wait);
-    if (err != ESP_OK) return err;
+    // Without this a rejected or missing frame is invisible; at most one line per 30 s.
+    static TickType_t lastReport = 0;
+    const bool report = xTaskGetTickCount() - lastReport >= pdMS_TO_TICKS(30000);
+    if (err != ESP_OK) {
+        if (report) {
+            lastReport = xTaskGetTickCount();
+            ESP_LOGW("MhiLink", "No frame within %lu ms: %s", static_cast<unsigned long>(pdTICKS_TO_MS(wait)),
+                     esp_err_to_name(err));
+        }
+        return err;
+    }
     queued = false;
-    if (done != &transaction || transaction.trans_len != wireSize * 8 ||
-        !decode(rx, wireSize, state)) return ESP_ERR_INVALID_RESPONSE;
+    if (done != &transaction || transaction.trans_len != wireSize * 8 || !decode(rx, wireSize, state)) {
+        if (report) {
+            lastReport = xTaskGetTickCount();
+            char hex[sizeof(rx) * 2 + 1] = {};
+            for (size_t i = 0; i < wireSize; ++i) snprintf(hex + i * 2, 3, "%02x", rx[i]);
+            ESP_LOGW("MhiLink", "Rejected frame: %u of %u bits, sum=%04x: %s",
+                     unsigned(done == &transaction ? transaction.trans_len : 0), unsigned(wireSize * 8),
+                     unsigned(checksum(rx, 18)), hex);
+        }
+        return ESP_ERR_INVALID_RESPONSE;
+    }
     return ESP_OK;
 }
 
